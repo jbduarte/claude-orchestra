@@ -53,27 +53,74 @@ function escapeForAppleScript(str: string): string {
   return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-// ---- Send message via AppleScript keystroke injection ----
+// ---- Find the TTY device for a session by matching CWD ----
 
-export function sendToSession(sessionCwd: string, message: string): { success: boolean; error?: string } {
+function findTtyForSession(sessionCwd: string): { tty: string; error?: string } | null {
   const processes = findClaudeProcesses();
-
-  if (processes.length === 0) {
-    return { success: false, error: 'No running Claude processes found' };
-  }
+  if (processes.length === 0) return { tty: '', error: 'No running Claude processes found' };
 
   const match = processes.find(p => sessionCwd.startsWith(p.cwd) || p.cwd.startsWith(sessionCwd));
+  if (!match) return { tty: '', error: `No process found for ${sessionCwd}` };
 
-  if (!match) {
-    return { success: false, error: `No process found for ${sessionCwd}` };
+  return { tty: `/dev/${match.tty}` };
+}
+
+// ---- Focus the Terminal tab containing a session ----
+
+function focusTerminalTab(ttyDevice: string): { success: boolean; error?: string } {
+  const script = `
+    tell application "Terminal"
+      set targetTab to missing value
+      set targetWindow to missing value
+      repeat with w in windows
+        repeat with t in tabs of w
+          if tty of t is "${ttyDevice}" then
+            set targetTab to t
+            set targetWindow to w
+          end if
+        end repeat
+      end repeat
+      if targetTab is missing value then
+        error "No Terminal tab found for ${ttyDevice}"
+      end if
+      set selected of targetTab to true
+      set frontmost of targetWindow to true
+    end tell
+    tell application "Terminal" to activate
+  `;
+
+  try {
+    execSync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, {
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: `AppleScript failed: ${(err as Error).message}` };
+  }
+}
+
+// ---- Public: focus a session's Terminal tab ----
+
+export function focusSession(sessionCwd: string): { success: boolean; error?: string } {
+  const result = findTtyForSession(sessionCwd);
+  if (!result || result.error) {
+    return { success: false, error: result?.error ?? 'Unknown error' };
+  }
+  return focusTerminalTab(result.tty);
+}
+
+// ---- Public: send a message to a session via keystroke injection ----
+
+export function sendToSession(sessionCwd: string, message: string): { success: boolean; error?: string } {
+  const result = findTtyForSession(sessionCwd);
+  if (!result || result.error) {
+    return { success: false, error: result?.error ?? 'Unknown error' };
   }
 
-  const ttyDevice = `/dev/${match.tty}`;
+  const ttyDevice = result.tty;
   const escaped = escapeForAppleScript(message);
 
-  // Use AppleScript to find the Terminal tab by TTY and type into it.
-  // Writing to /dev/ttysXXX only puts text on screen (output side);
-  // AppleScript keystroke injection actually feeds input to the process.
   const script = `
     tell application "Terminal"
       set targetTab to missing value
