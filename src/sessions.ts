@@ -6,7 +6,7 @@ import type { ActiveSession, SessionEntry } from './types.js';
 // ---- Constants ----
 
 const MAX_TAIL_BYTES = 524288; // 512KB — enough to capture sparse user messages
-const ACTIVE_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const ACTIVE_WINDOW_MS = 4 * 60 * 60 * 1000; // 4 hours — keep idle sessions visible
 const MAX_ENTRIES_PER_SESSION = 60;
 
 // ---- Cache ----

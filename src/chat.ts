@@ -239,11 +239,12 @@ export function sendToSession(sessionCwd: string, message: string): { success: b
       set selected of targetTab to true
       set frontmost of targetWindow to true
     end tell
-    delay 0.1
+    tell application "Terminal" to activate
+    delay 0.3
     tell application "System Events"
       tell process "Terminal"
         keystroke "${escaped}"
-        delay 0.05
+        delay 0.15
         keystroke return
       end tell
     end tell
