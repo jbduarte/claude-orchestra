@@ -94,27 +94,6 @@ function computeNotifications(
     }
   }
 
-  // Detect sessions that just went idle (working → idle transition)
-  const IDLE_THRESHOLD_MS = 60_000;
-  const prevWorking = new Set<string>();
-  for (const s of prev.sessions) {
-    if (Date.now() - s.lastActivityMs < IDLE_THRESHOLD_MS) {
-      prevWorking.add(s.sessionId);
-    }
-  }
-  for (const s of next.sessions) {
-    const isNowIdle = Date.now() - s.lastActivityMs >= IDLE_THRESHOLD_MS;
-    if (isNowIdle && prevWorking.has(s.sessionId)) {
-      const label = s.cwd?.split('/').pop() ?? s.project;
-      events.push({
-        type: 'agent_idle',
-        title: 'Session Waiting',
-        body: `${label} is waiting for input`,
-        dedupeKey: `idle:${s.sessionId}:${Math.floor(s.lastActivityMs / 60000)}`,
-      });
-    }
-  }
-
   // Detect messages needing input (plan approval, shutdown)
   const prevNeedsInput = new Set(
     prev.messages
@@ -149,6 +128,7 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
   const dataRef = useRef<Omit<DataState, 'loading'> | null>(null);
   const notifEnabled = useRef(true);
   const debouncedRef = useRef<ReturnType<typeof debounce> | null>(null);
+  const workingSessionsRef = useRef(new Set<string>());
 
   const doRefresh = useCallback(() => {
     const raw = readAllData(claudeDir, cacheRef.current);
@@ -159,6 +139,32 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
     // Compute notification diff BEFORE dispatch
     if (notifEnabled.current) {
       const events = computeNotifications(dataRef.current, newData);
+
+      // Detect working → idle transitions using persistent ref
+      const IDLE_THRESHOLD_MS = 60_000;
+      const nowWorking = new Set<string>();
+      for (const s of newData.sessions) {
+        if (Date.now() - s.lastActivityMs < IDLE_THRESHOLD_MS) {
+          nowWorking.add(s.sessionId);
+        }
+      }
+      // Sessions that WERE working but are NOW idle
+      for (const id of workingSessionsRef.current) {
+        if (!nowWorking.has(id)) {
+          const s = newData.sessions.find(sess => sess.sessionId === id);
+          if (s) {
+            const label = s.cwd?.split('/').pop() ?? s.project;
+            events.push({
+              type: 'agent_idle',
+              title: 'Session Waiting',
+              body: `${label} is waiting for input`,
+              dedupeKey: `idle:${s.sessionId}:${Math.floor(s.lastActivityMs / 60000)}`,
+            });
+          }
+        }
+      }
+      workingSessionsRef.current = nowWorking;
+
       for (const evt of events) {
         sendNotification(evt);
       }
