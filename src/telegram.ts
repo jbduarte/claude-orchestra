@@ -1,7 +1,7 @@
 import { request as httpsRequest } from 'node:https';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { sendToSession } from './chat.js';
+import { sendToSession, startNewSession } from './chat.js';
 import { findActiveSessions } from './sessions.js';
 import type { SessionCache } from './sessions.js';
 import type { ActiveSession } from './types.js';
@@ -137,11 +137,39 @@ function handleStatus(): void {
   sendReply(`*Status:* ${sessions.length} sessions\n🟢 ${working} working\n🟡 ${idle} idle`);
 }
 
+function handleNew(args: string): void {
+  if (!args.trim()) {
+    sendReply('Usage: `/new <path> [prompt]`\nExample: `/new ~/my-project fix the login bug`');
+    return;
+  }
+
+  // Split into path and optional prompt
+  const parts = args.trim().split(/\s+/);
+  let cwd = parts[0]!;
+  const prompt = parts.slice(1).join(' ') || undefined;
+
+  // Expand ~ to home directory
+  if (cwd.startsWith('~/')) {
+    cwd = cwd.replace('~', process.env['HOME'] ?? '');
+  } else if (cwd === '~') {
+    cwd = process.env['HOME'] ?? '';
+  }
+
+  const result = startNewSession(cwd, prompt);
+  if (result.success) {
+    const desc = prompt ? `with prompt: _${prompt}_` : '';
+    sendReply(`🚀 Started new Claude session in \`${cwd}\` ${desc}`);
+  } else {
+    sendReply(`❌ Failed: ${result.error}`);
+  }
+}
+
 function handleHelp(): void {
   sendReply(
     '*Claude Orchestra Commands:*\n\n' +
     '`/sessions` — List active sessions\n' +
     '`/send <n> <msg>` — Send message to session n\n' +
+    '`/new <path> [prompt]` — Start new Claude session\n' +
     '`/status` — Quick overview\n' +
     '`/help` — Show this help'
   );
@@ -156,6 +184,8 @@ function handleMessage(text: string): void {
     handleStatus();
   } else if (trimmed === '/help' || trimmed === '/start') {
     handleHelp();
+  } else if (trimmed.startsWith('/new ')) {
+    handleNew(trimmed.slice(5));
   } else if (trimmed.startsWith('/send ') || trimmed.startsWith('/s ')) {
     const args = trimmed.startsWith('/send ') ? trimmed.slice(6) : trimmed.slice(3);
     handleSend(args);

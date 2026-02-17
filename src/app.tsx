@@ -4,7 +4,7 @@ import { Spinner } from '@inkjs/ui';
 import { FullScreenBox, useScreenSize } from 'fullscreen-ink';
 import { useClaudeData } from './hooks.js';
 import { setNotificationsEnabled } from './notify.js';
-import { sendToSession, focusSession } from './chat.js';
+import { sendToSession, focusSession, startNewSession } from './chat.js';
 import { MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT } from './constants.js';
 import { homedir } from 'node:os';
 import type { ActiveSession, SessionEntry } from './types.js';
@@ -217,7 +217,7 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [scrollOffset, setScrollOffset] = useState(0);
   const [notificationsOn, setNotificationsOn] = useState(true);
-  const [inputMode, setInputMode] = useState(false);
+  const [inputMode, setInputMode] = useState<false | 'chat' | 'new'>(false);
   const [inputText, setInputText] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
 
@@ -234,10 +234,24 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
         return;
       }
       if (key.return) {
-        if (inputText.trim() && selectedSession?.cwd) {
-          const result = sendToSession(selectedSession.cwd, inputText.trim());
+        const text = inputText.trim();
+        if (inputMode === 'chat' && text && selectedSession?.cwd) {
+          const result = sendToSession(selectedSession.cwd, text);
           if (result.success) {
             setStatusMsg(`Sent to ${sessionLabel(selectedSession)}`);
+          } else {
+            setStatusMsg(`Failed: ${result.error}`);
+          }
+        } else if (inputMode === 'new' && text) {
+          // Parse: path [prompt]
+          const parts = text.split(/\s+/);
+          let cwd = parts[0]!;
+          const prompt = parts.slice(1).join(' ') || undefined;
+          if (cwd.startsWith('~/')) cwd = cwd.replace('~', HOME);
+          else if (cwd === '~') cwd = HOME;
+          const result = startNewSession(cwd, prompt);
+          if (result.success) {
+            setStatusMsg(`Started session in ${parts[0]}`);
           } else {
             setStatusMsg(`Failed: ${result.error}`);
           }
@@ -264,7 +278,12 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
       return;
     }
     if (input === 'i') {
-      setInputMode(true);
+      setInputMode('chat');
+      setInputText('');
+      return;
+    }
+    if (input === 's') {
+      setInputMode('new');
       setInputText('');
       return;
     }
@@ -382,14 +401,14 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
       <Box paddingX={1}>
         {inputMode ? (
           <Text>
-            <Text color="green" bold>{'> '}</Text>
+            <Text color="green" bold>{inputMode === 'new' ? 'new> ' : '> '}</Text>
             <Text>{inputText}</Text>
             <Text dimColor>█</Text>
-            <Text dimColor>  (Enter:send Esc:cancel)</Text>
+            <Text dimColor>  {inputMode === 'new' ? '(path [prompt] Enter:start Esc:cancel)' : '(Enter:send Esc:cancel)'}</Text>
           </Text>
         ) : (
           <Text dimColor>
-            Tab:switch Enter:focus ↑↓:scroll i:chat q:quit n:notif({notificationsOn ? 'ON' : 'OFF'}) r:refresh
+            Tab:switch Enter:focus ↑↓:scroll i:chat s:new q:quit n:notif({notificationsOn ? 'ON' : 'OFF'}) r:refresh
           </Text>
         )}
       </Box>

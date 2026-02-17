@@ -260,3 +260,27 @@ export function sendToSession(sessionCwd: string, message: string): { success: b
     return { success: false, error: `AppleScript failed: ${(err as Error).message}` };
   }
 }
+
+// ---- Public: start a new Claude session in a new Terminal tab ----
+
+export function startNewSession(cwd: string, prompt?: string): { success: boolean; error?: string } {
+  const safeCwd = escapeForAppleScript(cwd);
+  const claudeCmd = prompt
+    ? `cd "${safeCwd}" && claude "${escapeForAppleScript(prompt)}"`
+    : `cd "${safeCwd}" && claude`;
+
+  const script = `tell application "Terminal"
+    activate
+    do script "${claudeCmd}"
+  end tell`;
+
+  try {
+    execSync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, {
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: `Failed to start session: ${(err as Error).message}` };
+  }
+}
