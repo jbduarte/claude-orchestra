@@ -264,14 +264,15 @@ export function sendToSession(sessionCwd: string, message: string): { success: b
 // ---- Public: start a new Claude session in a new Terminal tab ----
 
 export function startNewSession(cwd: string, prompt?: string): { success: boolean; error?: string } {
-  const safeCwd = escapeForAppleScript(cwd);
-  const claudeCmd = prompt
-    ? `cd "${safeCwd}" && claude "${escapeForAppleScript(prompt)}"`
-    : `cd "${safeCwd}" && claude`;
+  // Use single quotes for shell args (safe inside AppleScript double-quoted strings)
+  const shellEscape = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
+  const shellCmd = prompt
+    ? `cd ${shellEscape(cwd)} && claude ${shellEscape(prompt)}`
+    : `cd ${shellEscape(cwd)} && claude`;
 
   const script = `tell application "Terminal"
     activate
-    do script "${claudeCmd}"
+    do script "${escapeForAppleScript(shellCmd)}"
   end tell`;
 
   try {
