@@ -29,6 +29,21 @@ function shortId(id: string): string {
   return id.slice(0, 7);
 }
 
+function sessionStatus(session: ActiveSession): { label: string; color: string; dot: string } {
+  const age = Date.now() - session.lastActivityMs;
+  const lastEntry = session.entries[session.entries.length - 1];
+
+  if (age < 30_000) {
+    // File modified in last 30s — actively working
+    if (lastEntry?.type === 'tool_use') return { label: 'working', color: 'green', dot: '◉' };
+    if (lastEntry?.type === 'assistant') return { label: 'responding', color: 'green', dot: '◉' };
+    return { label: 'active', color: 'green', dot: '●' };
+  }
+  if (age < 2 * 60_000) return { label: 'active', color: 'green', dot: '●' };
+  if (age < 5 * 60_000) return { label: 'waiting', color: 'yellow', dot: '●' };
+  return { label: 'idle', color: 'gray', dot: '○' };
+}
+
 function sessionLabel(session: ActiveSession): string {
   // Prefer cwd-based name, then project, then short ID
   if (session.cwd) {
@@ -92,7 +107,7 @@ function SessionList({
       <Text bold color="cyan"> Sessions ({sessions.length}) </Text>
       {sessions.map((session, i) => {
         const isSelected = i === selectedIndex;
-        const isActive = Date.now() - session.lastActivityMs < 2 * 60 * 1000;
+        const status = sessionStatus(session);
         return (
           <Box key={session.sessionId} flexDirection="column">
             <Text
@@ -101,11 +116,11 @@ function SessionList({
               bold={isSelected}
               inverse={isSelected}
             >
-              {isActive ? <Text color="green">●</Text> : <Text dimColor>○</Text>}{' '}
+              <Text color={status.color}>{status.dot}</Text>{' '}
               {sessionLabel(session)}
             </Text>
             <Text dimColor wrap="truncate-end">
-              {'  '}{session.model ? session.model.replace('claude-', '').split('-202')[0] : ''} {timeAgo(session.lastActivityMs)}
+              {'  '}<Text color={status.color}>{status.label}</Text> {timeAgo(session.lastActivityMs)}
             </Text>
           </Box>
         );
