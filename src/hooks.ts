@@ -5,7 +5,7 @@ import { readAllData, enrichTeamStatuses } from './parsers.js';
 import type { FileCache } from './parsers.js';
 import { findActiveSessions } from './sessions.js';
 import type { SessionCache } from './sessions.js';
-import { DEBOUNCE_MS, AWAIT_WRITE_STABILITY_MS, AWAIT_WRITE_POLL_MS } from './constants.js';
+import { DEBOUNCE_MS, AWAIT_WRITE_STABILITY_MS, AWAIT_WRITE_POLL_MS, AUTO_REFRESH_MS } from './constants.js';
 import { sendNotification } from './notify.js';
 
 // ---- Data reducer ----
@@ -91,6 +91,27 @@ function computeNotifications(
           dedupeKey: `session:${s.sessionId}:${lastEntry.timestamp}`,
         });
       }
+    }
+  }
+
+  // Detect sessions that just went idle (working → idle transition)
+  const IDLE_THRESHOLD_MS = 60_000;
+  const prevWorking = new Set<string>();
+  for (const s of prev.sessions) {
+    if (Date.now() - s.lastActivityMs < IDLE_THRESHOLD_MS) {
+      prevWorking.add(s.sessionId);
+    }
+  }
+  for (const s of next.sessions) {
+    const isNowIdle = Date.now() - s.lastActivityMs >= IDLE_THRESHOLD_MS;
+    if (isNowIdle && prevWorking.has(s.sessionId)) {
+      const label = s.cwd?.split('/').pop() ?? s.project;
+      events.push({
+        type: 'agent_idle',
+        title: 'Session Waiting',
+        body: `${label} is waiting for input`,
+        dedupeKey: `idle:${s.sessionId}:${Math.floor(s.lastActivityMs / 60000)}`,
+      });
     }
   }
 
@@ -188,9 +209,15 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
     // Initial load
     doRefresh();
 
+    // Periodic refresh — safety net when chokidar misses JSONL appends
+    const interval = setInterval(() => {
+      if (!disposed) doRefresh();
+    }, AUTO_REFRESH_MS);
+
     return () => {
       disposed = true;
       refresh.cancel();
+      clearInterval(interval);
       watcher.close();
     };
   }, [claudeDir, doRefresh]);
