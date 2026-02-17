@@ -57,7 +57,24 @@ function escapeForAppleScript(str: string): string {
 
 function findProcessForSession(sessionCwd: string): ProcessInfo | null {
   const processes = findClaudeProcesses();
-  return processes.find(p => sessionCwd.startsWith(p.cwd) || p.cwd.startsWith(sessionCwd)) ?? null;
+
+  // Prefer exact match, then longest prefix match to avoid wrong session
+  let best: ProcessInfo | null = null;
+  let bestLen = -1;
+
+  for (const p of processes) {
+    if (p.cwd === sessionCwd) return p; // exact match — done
+    if (sessionCwd.startsWith(p.cwd + '/') && p.cwd.length > bestLen) {
+      best = p;
+      bestLen = p.cwd.length;
+    }
+    if (p.cwd.startsWith(sessionCwd + '/') && sessionCwd.length > bestLen) {
+      best = p;
+      bestLen = sessionCwd.length;
+    }
+  }
+
+  return best;
 }
 
 // ---- Walk up process tree to find the owning GUI app ----
