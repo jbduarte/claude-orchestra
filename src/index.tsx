@@ -4,6 +4,7 @@ import { withFullScreen } from 'fullscreen-ink';
 import App from './app.js';
 import { DEFAULT_CLAUDE_DIR } from './constants.js';
 import { loadTelegramConfig } from './notify.js';
+import { startTelegramBot, stopTelegramBot } from './telegram.js';
 
 const HELP = `Claude Orchestra — Terminal dashboard for Claude Code sessions
 
@@ -39,12 +40,14 @@ if (!process.stdin.isTTY) {
 }
 
 // Load Telegram config from project root (config.json)
-loadTelegramConfig(new URL('..', import.meta.url).pathname);
+const configDir = new URL('..', import.meta.url).pathname;
+loadTelegramConfig(configDir);
+startTelegramBot(configDir, claudeDir);
 
 const { start, waitUntilExit } = withFullScreen(<App claudeDir={claudeDir} />);
 
-process.on('SIGINT', () => process.exit(0));
-process.on('SIGTERM', () => process.exit(0));
+process.on('SIGINT', () => { stopTelegramBot(); process.exit(0); });
+process.on('SIGTERM', () => { stopTelegramBot(); process.exit(0); });
 
 await start();
 await waitUntilExit();
