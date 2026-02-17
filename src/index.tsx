@@ -32,6 +32,11 @@ if (!existsSync(claudeDir)) {
   process.exit(1);
 }
 
+if (!process.stdin.isTTY) {
+  console.error('Error: claude-orchestra requires an interactive terminal (TTY).');
+  process.exit(1);
+}
+
 const { start, waitUntilExit } = withFullScreen(<App claudeDir={claudeDir} />);
 
 process.on('SIGINT', () => process.exit(0));
