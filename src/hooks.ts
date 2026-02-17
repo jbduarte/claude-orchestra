@@ -143,11 +143,15 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
       const events = computeNotifications(dataRef.current, newData);
 
       // Detect working → idle transitions using persistent ref
-      const IDLE_THRESHOLD_MS = 60_000;
+      // Uses same logic as UI: <60s=working, >180s=idle, 60-180s=check last entry type
       const nowWorking = new Set<string>();
       for (const s of newData.sessions) {
-        if (Date.now() - s.lastActivityMs < IDLE_THRESHOLD_MS) {
+        const age = Date.now() - s.lastActivityMs;
+        if (age < 60_000) {
           nowWorking.add(s.sessionId);
+        } else if (age <= 180_000) {
+          const last = s.entries[s.entries.length - 1];
+          if (last?.type === 'tool_use') nowWorking.add(s.sessionId);
         }
       }
       // Sessions that WERE working but are NOW idle (working→idle transition)

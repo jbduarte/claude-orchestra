@@ -30,10 +30,18 @@ function shortId(id: string): string {
   return id.slice(0, 7);
 }
 
-function sessionStatus(session: ActiveSession): { label: string; color: string; dot: string } {
+function isSessionIdle(session: ActiveSession): boolean {
   const age = Date.now() - session.lastActivityMs;
-  if (age < 60_000) return { label: 'working', color: 'green', dot: '●' };
-  return { label: 'idle', color: 'yellow', dot: '○' };
+  if (age < 60_000) return false; // active within 60s — definitely working
+  if (age > 180_000) return true; // 3 min silence — idle regardless
+  // Between 1-3 min: check last entry — if assistant text, likely waiting for input
+  const last = session.entries[session.entries.length - 1];
+  return last?.type === 'assistant' || last?.type === 'user';
+}
+
+function sessionStatus(session: ActiveSession): { label: string; color: string; dot: string } {
+  if (isSessionIdle(session)) return { label: 'idle', color: 'yellow', dot: '○' };
+  return { label: 'working', color: 'green', dot: '●' };
 }
 
 function sessionLabel(session: ActiveSession): string {
