@@ -267,8 +267,8 @@ export function startNewSession(cwd: string, prompt?: string): { success: boolea
   // Use single quotes for shell args (safe inside AppleScript double-quoted strings)
   const shellEscape = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
   const shellCmd = prompt
-    ? `cd ${shellEscape(cwd)} && claude ${shellEscape(prompt)}`
-    : `cd ${shellEscape(cwd)} && claude`;
+    ? `cd ${shellEscape(cwd)} && claude --dangerously-skip-permissions ${shellEscape(prompt)}`
+    : `cd ${shellEscape(cwd)} && claude --dangerously-skip-permissions`;
 
   const script = `tell application "Terminal"
     activate
