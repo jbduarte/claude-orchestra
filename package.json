@@ -1,0 +1,45 @@
+{
+  "name": "claude-orchestra",
+  "version": "1.0.0",
+  "description": "Terminal dashboard for managing multiple Claude Code sessions in parallel",
+  "type": "module",
+  "bin": {
+    "claude-orchestra": "./dist/index.js"
+  },
+  "scripts": {
+    "start": "tsx src/index.tsx",
+    "build": "tsc",
+    "dev": "tsx --watch src/index.tsx"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jbduarte/claude-orchestra.git"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "terminal",
+    "dashboard",
+    "tui",
+    "ink"
+  ],
+  "author": "Joao B. Duarte",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/jbduarte/claude-orchestra/issues"
+  },
+  "homepage": "https://github.com/jbduarte/claude-orchestra#readme",
+  "dependencies": {
+    "@inkjs/ui": "2.0.0",
+    "chokidar": "5.0.0",
+    "fullscreen-ink": "0.1.0",
+    "ink": "6.7.0",
+    "react": "19.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "25.2.3",
+    "@types/react": "19.2.14",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3"
+  }
+}
