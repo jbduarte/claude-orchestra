@@ -20,19 +20,31 @@ function expandHome(p: string): string {
   return p;
 }
 
-/** Parse "path prompt" where path may contain spaces. Tries longest valid path first. */
+/** Parse "path prompt" where path may contain spaces or quotes. */
 function parseCwdAndPrompt(input: string): { cwd: string; prompt?: string } {
-  const words = input.split(/\s+/);
-  // Try progressively longer paths, longest first
+  const trimmed = input.trim();
+
+  // Handle quoted paths: 'path with spaces' prompt or "path with spaces" prompt
+  const quoteMatch = trimmed.match(/^(['"])(.*?)\1\s*(.*)?$/);
+  if (quoteMatch) {
+    const cwd = expandHome(quoteMatch[2]!);
+    const prompt = quoteMatch[3]?.trim() || undefined;
+    return { cwd, prompt };
+  }
+
+  // Unquoted: try progressively longer paths against filesystem
+  const words = trimmed.split(/\s+/);
   for (let i = words.length; i >= 1; i--) {
-    const candidate = expandHome(words.slice(0, i).join(' '));
+    const raw = words.slice(0, i).join(' ').replace(/^['"]|['"]$/g, '');
+    const candidate = expandHome(raw);
     if (existsSync(candidate)) {
       const prompt = words.slice(i).join(' ') || undefined;
       return { cwd: candidate, prompt };
     }
   }
-  // Nothing matched — use first word as path
-  return { cwd: expandHome(words[0]!), prompt: words.slice(1).join(' ') || undefined };
+  // Nothing matched — use first word, strip quotes
+  const raw = words[0]!.replace(/^['"]|['"]$/g, '');
+  return { cwd: expandHome(raw), prompt: words.slice(1).join(' ') || undefined };
 }
 
 function timeAgo(ms: number): string {

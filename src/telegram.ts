@@ -145,15 +145,28 @@ function expandHome(p: string): string {
 }
 
 function parseCwdAndPrompt(input: string): { cwd: string; prompt?: string } {
-  const words = input.split(/\s+/);
+  const trimmed = input.trim();
+
+  // Handle quoted paths
+  const quoteMatch = trimmed.match(/^(['"])(.*?)\1\s*(.*)?$/);
+  if (quoteMatch) {
+    const cwd = expandHome(quoteMatch[2]!);
+    const prompt = quoteMatch[3]?.trim() || undefined;
+    return { cwd, prompt };
+  }
+
+  // Unquoted: try progressively longer paths against filesystem
+  const words = trimmed.split(/\s+/);
   for (let i = words.length; i >= 1; i--) {
-    const candidate = expandHome(words.slice(0, i).join(' '));
+    const raw = words.slice(0, i).join(' ').replace(/^['"]|['"]$/g, '');
+    const candidate = expandHome(raw);
     if (existsSync(candidate)) {
       const prompt = words.slice(i).join(' ') || undefined;
       return { cwd: candidate, prompt };
     }
   }
-  return { cwd: expandHome(words[0]!), prompt: words.slice(1).join(' ') || undefined };
+  const raw = words[0]!.replace(/^['"]|['"]$/g, '');
+  return { cwd: expandHome(raw), prompt: words.slice(1).join(' ') || undefined };
 }
 
 function handleNew(args: string): void {
