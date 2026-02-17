@@ -1,5 +1,5 @@
 import { request as httpsRequest } from 'node:https';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { sendToSession, startNewSession } from './chat.js';
 import { findActiveSessions } from './sessions.js';
@@ -137,28 +137,38 @@ function handleStatus(): void {
   sendReply(`*Status:* ${sessions.length} sessions\n🟢 ${working} working\n🟡 ${idle} idle`);
 }
 
+function expandHome(p: string): string {
+  const home = process.env['HOME'] ?? '';
+  if (p.startsWith('~/')) return home + p.slice(1);
+  if (p === '~') return home;
+  return p;
+}
+
+function parseCwdAndPrompt(input: string): { cwd: string; prompt?: string } {
+  const words = input.split(/\s+/);
+  for (let i = words.length; i >= 1; i--) {
+    const candidate = expandHome(words.slice(0, i).join(' '));
+    if (existsSync(candidate)) {
+      const prompt = words.slice(i).join(' ') || undefined;
+      return { cwd: candidate, prompt };
+    }
+  }
+  return { cwd: expandHome(words[0]!), prompt: words.slice(1).join(' ') || undefined };
+}
+
 function handleNew(args: string): void {
   if (!args.trim()) {
     sendReply('Usage: `/new <path> [prompt]`\nExample: `/new ~/my-project fix the login bug`');
     return;
   }
 
-  // Split into path and optional prompt
-  const parts = args.trim().split(/\s+/);
-  let cwd = parts[0]!;
-  const prompt = parts.slice(1).join(' ') || undefined;
-
-  // Expand ~ to home directory
-  if (cwd.startsWith('~/')) {
-    cwd = cwd.replace('~', process.env['HOME'] ?? '');
-  } else if (cwd === '~') {
-    cwd = process.env['HOME'] ?? '';
-  }
+  const { cwd, prompt } = parseCwdAndPrompt(args.trim());
 
   const result = startNewSession(cwd, prompt);
   if (result.success) {
+    const label = cwd.split('/').pop() ?? cwd;
     const desc = prompt ? `with prompt: _${prompt}_` : '';
-    sendReply(`🚀 Started new Claude session in \`${cwd}\` ${desc}`);
+    sendReply(`🚀 Started new Claude session in \`${label}\` ${desc}`);
   } else {
     sendReply(`❌ Failed: ${result.error}`);
   }

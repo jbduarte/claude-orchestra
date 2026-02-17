@@ -7,11 +7,33 @@ import { setNotificationsEnabled } from './notify.js';
 import { sendToSession, focusSession, startNewSession } from './chat.js';
 import { MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT } from './constants.js';
 import { homedir } from 'node:os';
+import { existsSync } from 'node:fs';
 import type { ActiveSession, SessionEntry } from './types.js';
 
 const HOME = homedir();
 
 // ---- Helpers ----
+
+function expandHome(p: string): string {
+  if (p.startsWith('~/')) return HOME + p.slice(1);
+  if (p === '~') return HOME;
+  return p;
+}
+
+/** Parse "path prompt" where path may contain spaces. Tries longest valid path first. */
+function parseCwdAndPrompt(input: string): { cwd: string; prompt?: string } {
+  const words = input.split(/\s+/);
+  // Try progressively longer paths, longest first
+  for (let i = words.length; i >= 1; i--) {
+    const candidate = expandHome(words.slice(0, i).join(' '));
+    if (existsSync(candidate)) {
+      const prompt = words.slice(i).join(' ') || undefined;
+      return { cwd: candidate, prompt };
+    }
+  }
+  // Nothing matched — use first word as path
+  return { cwd: expandHome(words[0]!), prompt: words.slice(1).join(' ') || undefined };
+}
 
 function timeAgo(ms: number): string {
   const diff = Date.now() - ms;
@@ -243,15 +265,10 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
             setStatusMsg(`Failed: ${result.error}`);
           }
         } else if (inputMode === 'new' && text) {
-          // Parse: path [prompt]
-          const parts = text.split(/\s+/);
-          let cwd = parts[0]!;
-          const prompt = parts.slice(1).join(' ') || undefined;
-          if (cwd.startsWith('~/')) cwd = cwd.replace('~', HOME);
-          else if (cwd === '~') cwd = HOME;
+          const { cwd, prompt } = parseCwdAndPrompt(text);
           const result = startNewSession(cwd, prompt);
           if (result.success) {
-            setStatusMsg(`Started session in ${parts[0]}`);
+            setStatusMsg(`Started session in ${cwd.split('/').pop()}`);
           } else {
             setStatusMsg(`Failed: ${result.error}`);
           }
