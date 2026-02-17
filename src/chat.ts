@@ -196,13 +196,15 @@ export function focusSession(sessionCwd: string): { success: boolean; error?: st
 
   const ttyDevice = `/dev/${proc.tty}`;
 
-  // Try Terminal.app first (can focus specific tab)
-  if (focusTerminalTab(ttyDevice)) {
+  // Detect parent app first to avoid accidentally activating Terminal.app
+  const app = findParentApp(proc.pid);
+
+  // Only use Terminal.app tab-specific focus if session is actually in Terminal.app
+  if ((!app || app === 'Terminal') && focusTerminalTab(ttyDevice)) {
     return { success: true };
   }
 
-  // Fallback: find parent app and activate it
-  const app = findParentApp(proc.pid);
+  // Activate the detected parent app
   if (app && focusApp(app)) {
     return { success: true };
   }
