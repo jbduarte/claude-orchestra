@@ -53,21 +53,78 @@ function escapeForAppleScript(str: string): string {
   return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-// ---- Find the TTY device for a session by matching CWD ----
+// ---- Find the process matching a session by CWD ----
 
-function findTtyForSession(sessionCwd: string): { tty: string; error?: string } | null {
+function findProcessForSession(sessionCwd: string): ProcessInfo | null {
   const processes = findClaudeProcesses();
-  if (processes.length === 0) return { tty: '', error: 'No running Claude processes found' };
-
-  const match = processes.find(p => sessionCwd.startsWith(p.cwd) || p.cwd.startsWith(sessionCwd));
-  if (!match) return { tty: '', error: `No process found for ${sessionCwd}` };
-
-  return { tty: `/dev/${match.tty}` };
+  return processes.find(p => sessionCwd.startsWith(p.cwd) || p.cwd.startsWith(sessionCwd)) ?? null;
 }
 
-// ---- Focus the Terminal tab containing a session ----
+// ---- Walk up process tree to find the owning GUI app ----
 
-function focusTerminalTab(ttyDevice: string): { success: boolean; error?: string } {
+function findParentApp(pid: number): string | null {
+  const knownApps: Record<string, string> = {
+    'terminal': 'Terminal',
+    'iterm2': 'iTerm2',
+    'iterm': 'iTerm',
+    'alacritty': 'Alacritty',
+    'kitty': 'kitty',
+    'wezterm-gui': 'WezTerm',
+    'warp': 'Warp',
+    'hyper': 'Hyper',
+  };
+
+  // Also match apps by path patterns (IDEs with embedded terminals)
+  const idePatterns: Array<{ pattern: RegExp; app: string }> = [
+    { pattern: /pycharm/i, app: 'PyCharm' },
+    { pattern: /idea/i, app: 'IntelliJ IDEA' },
+    { pattern: /webstorm/i, app: 'WebStorm' },
+    { pattern: /goland/i, app: 'GoLand' },
+    { pattern: /clion/i, app: 'CLion' },
+    { pattern: /rubymine/i, app: 'RubyMine' },
+    { pattern: /rider/i, app: 'Rider' },
+    { pattern: /code/i, app: 'Visual Studio Code' },
+    { pattern: /cursor/i, app: 'Cursor' },
+  ];
+
+  try {
+    // Walk up the process tree (max 20 levels to avoid infinite loops)
+    let currentPid = pid;
+    for (let i = 0; i < 20; i++) {
+      const info = execSync(`ps -o ppid=,comm= -p ${currentPid} 2>/dev/null`, {
+        encoding: 'utf-8',
+        timeout: 2000,
+      }).trim();
+
+      if (!info) break;
+
+      const ppid = parseInt(info.split(/\s+/)[0] ?? '', 10);
+      const comm = info.replace(/^\s*\d+\s+/, '').toLowerCase();
+
+      if (isNaN(ppid) || ppid <= 1) break;
+
+      // Check exact matches
+      for (const [key, appName] of Object.entries(knownApps)) {
+        if (comm.includes(key)) return appName;
+      }
+
+      // Check IDE patterns
+      for (const { pattern, app } of idePatterns) {
+        if (pattern.test(comm)) return app;
+      }
+
+      currentPid = ppid;
+    }
+  } catch {
+    // Ignore errors
+  }
+
+  return null;
+}
+
+// ---- Focus the Terminal.app tab containing a TTY ----
+
+function focusTerminalTab(ttyDevice: string): boolean {
   const script = `
     tell application "Terminal"
       set targetTab to missing value
@@ -81,44 +138,73 @@ function focusTerminalTab(ttyDevice: string): { success: boolean; error?: string
         end repeat
       end repeat
       if targetTab is missing value then
-        error "No Terminal tab found for ${ttyDevice}"
+        return false
       end if
       set selected of targetTab to true
       set frontmost of targetWindow to true
     end tell
     tell application "Terminal" to activate
+    return true
   `;
 
   try {
-    execSync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, {
+    const result = execSync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, {
       encoding: 'utf-8',
       timeout: 5000,
-    });
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: `AppleScript failed: ${(err as Error).message}` };
+    }).trim();
+    return result === 'true';
+  } catch {
+    return false;
   }
 }
 
-// ---- Public: focus a session's Terminal tab ----
+// ---- Focus any app by name ----
+
+function focusApp(appName: string): boolean {
+  try {
+    execSync(`osascript -e 'tell application "${escapeForAppleScript(appName)}" to activate'`, {
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ---- Public: focus a session's window ----
 
 export function focusSession(sessionCwd: string): { success: boolean; error?: string } {
-  const result = findTtyForSession(sessionCwd);
-  if (!result || result.error) {
-    return { success: false, error: result?.error ?? 'Unknown error' };
+  const proc = findProcessForSession(sessionCwd);
+  if (!proc) {
+    return { success: false, error: 'No running process found' };
   }
-  return focusTerminalTab(result.tty);
+
+  const ttyDevice = `/dev/${proc.tty}`;
+
+  // Try Terminal.app first (can focus specific tab)
+  if (focusTerminalTab(ttyDevice)) {
+    return { success: true };
+  }
+
+  // Fallback: find parent app and activate it
+  const app = findParentApp(proc.pid);
+  if (app && focusApp(app)) {
+    return { success: true };
+  }
+
+  return { success: false, error: `Could not find window for ${ttyDevice}` };
 }
 
 // ---- Public: send a message to a session via keystroke injection ----
 
 export function sendToSession(sessionCwd: string, message: string): { success: boolean; error?: string } {
-  const result = findTtyForSession(sessionCwd);
-  if (!result || result.error) {
-    return { success: false, error: result?.error ?? 'Unknown error' };
+  const proc = findProcessForSession(sessionCwd);
+  if (!proc) {
+    return { success: false, error: 'No running process found' };
   }
 
-  const ttyDevice = result.tty;
+  const ttyDevice = `/dev/${proc.tty}`;
   const escaped = escapeForAppleScript(message);
 
   const script = `
