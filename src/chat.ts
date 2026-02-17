@@ -1,5 +1,4 @@
 import { execSync } from 'node:child_process';
-import { openSync, writeSync, closeSync } from 'node:fs';
 
 interface ProcessInfo {
   pid: number;
@@ -11,7 +10,6 @@ interface ProcessInfo {
 
 function findClaudeProcesses(): ProcessInfo[] {
   try {
-    // Get PIDs and TTYs of claude processes
     const psOutput = execSync('ps -o pid=,tty= -c -C claude 2>/dev/null || ps -o pid=,tty=,comm= | grep "claude$"', {
       encoding: 'utf-8',
       timeout: 5000,
@@ -26,7 +24,6 @@ function findClaudeProcesses(): ProcessInfo[] {
       const tty = parts[1];
       if (!pid || !tty || tty === '??' || isNaN(pid)) continue;
 
-      // Get CWD via lsof
       try {
         const lsofOutput = execSync(`lsof -a -p ${pid} -d cwd 2>/dev/null`, {
           encoding: 'utf-8',
@@ -50,7 +47,13 @@ function findClaudeProcesses(): ProcessInfo[] {
   }
 }
 
-// ---- Match a session to a process by CWD ----
+// ---- Escape string for AppleScript ----
+
+function escapeForAppleScript(str: string): string {
+  return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+// ---- Send message via AppleScript keystroke injection ----
 
 export function sendToSession(sessionCwd: string, message: string): { success: boolean; error?: string } {
   const processes = findClaudeProcesses();
@@ -59,24 +62,53 @@ export function sendToSession(sessionCwd: string, message: string): { success: b
     return { success: false, error: 'No running Claude processes found' };
   }
 
-  // Find process whose CWD matches the session's CWD
   const match = processes.find(p => sessionCwd.startsWith(p.cwd) || p.cwd.startsWith(sessionCwd));
 
   if (!match) {
     return { success: false, error: `No process found for ${sessionCwd}` };
   }
 
-  const ttyPath = `/dev/${match.tty}`;
+  const ttyDevice = `/dev/${match.tty}`;
+  const escaped = escapeForAppleScript(message);
+
+  // Use AppleScript to find the Terminal tab by TTY and type into it.
+  // Writing to /dev/ttysXXX only puts text on screen (output side);
+  // AppleScript keystroke injection actually feeds input to the process.
+  const script = `
+    tell application "Terminal"
+      set targetTab to missing value
+      set targetWindow to missing value
+      repeat with w in windows
+        repeat with t in tabs of w
+          if tty of t is "${ttyDevice}" then
+            set targetTab to t
+            set targetWindow to w
+          end if
+        end repeat
+      end repeat
+      if targetTab is missing value then
+        error "No Terminal tab found for ${ttyDevice}"
+      end if
+      set selected of targetTab to true
+      set frontmost of targetWindow to true
+    end tell
+    delay 0.1
+    tell application "System Events"
+      tell process "Terminal"
+        keystroke "${escaped}"
+        delay 0.05
+        keystroke return
+      end tell
+    end tell
+  `;
 
   try {
-    const fd = openSync(ttyPath, 'w');
-    try {
-      writeSync(fd, message + '\n');
-    } finally {
-      closeSync(fd);
-    }
+    execSync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, {
+      encoding: 'utf-8',
+      timeout: 10000,
+    });
     return { success: true };
   } catch (err) {
-    return { success: false, error: `Cannot write to ${ttyPath}: ${(err as Error).message}` };
+    return { success: false, error: `AppleScript failed: ${(err as Error).message}` };
   }
 }
