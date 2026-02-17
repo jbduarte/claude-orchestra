@@ -101,18 +101,15 @@ function findParentApp(pid: number): string | null {
       const ppid = parseInt(info.split(/\s+/)[0] ?? '', 10);
       const comm = info.replace(/^\s*\d+\s+/, '').toLowerCase();
 
-      if (isNaN(ppid) || ppid <= 1) break;
-
-      // Check exact matches
+      // Check matches BEFORE breaking on ppid — the app itself may have ppid=1
       for (const [key, appName] of Object.entries(knownApps)) {
         if (comm.includes(key)) return appName;
       }
-
-      // Check IDE patterns
       for (const { pattern, app } of idePatterns) {
         if (pattern.test(comm)) return app;
       }
 
+      if (isNaN(ppid) || ppid <= 1) break;
       currentPid = ppid;
     }
   } catch {
