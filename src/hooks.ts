@@ -129,6 +129,8 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
   const notifEnabled = useRef(true);
   const debouncedRef = useRef<ReturnType<typeof debounce> | null>(null);
   const workingSessionsRef = useRef(new Set<string>());
+  const knownSessionsRef = useRef(new Set<string>());
+  const isFirstRefresh = useRef(true);
 
   const doRefresh = useCallback(() => {
     const raw = readAllData(claudeDir, cacheRef.current);
@@ -148,7 +150,7 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
           nowWorking.add(s.sessionId);
         }
       }
-      // Sessions that WERE working but are NOW idle
+      // Sessions that WERE working but are NOW idle (working→idle transition)
       for (const id of workingSessionsRef.current) {
         if (!nowWorking.has(id)) {
           const s = newData.sessions.find(sess => sess.sessionId === id);
@@ -163,7 +165,24 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
           }
         }
       }
+      // Also detect sessions that are idle but we never saw as working
+      // (e.g. dashboard started after session went idle) — skip first refresh to avoid spam
+      for (const s of newData.sessions) {
+        if (!isFirstRefresh.current && !nowWorking.has(s.sessionId) && !knownSessionsRef.current.has(s.sessionId)) {
+          // First time seeing this idle session — only notify once
+          const label = s.cwd?.split('/').pop() ?? s.project;
+          events.push({
+            type: 'agent_idle',
+            title: 'Session Waiting',
+            body: `${label} is waiting for input`,
+            dedupeKey: `idle:${s.sessionId}:${Math.floor(s.lastActivityMs / 60000)}`,
+          });
+        }
+      }
+      // Track all known sessions (working + idle we've already seen)
       workingSessionsRef.current = nowWorking;
+      knownSessionsRef.current = new Set(newData.sessions.map(s => s.sessionId));
+      isFirstRefresh.current = false;
 
       for (const evt of events) {
         sendNotification(evt);
