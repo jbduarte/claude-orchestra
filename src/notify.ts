@@ -1,6 +1,33 @@
 import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { request } from 'node:https';
 import { MAX_NOTIFICATION_LENGTH, NOTIFICATION_DEDUP_MS } from './constants.js';
 import type { NotificationEvent } from './types.js';
+
+// ---- Telegram config ----
+
+interface TelegramConfig {
+  botToken: string;
+  chatId: number;
+}
+
+let telegramConfig: TelegramConfig | null = null;
+
+export function loadTelegramConfig(configDir: string): void {
+  try {
+    const configPath = join(configDir, 'config.json');
+    const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
+    if (raw?.telegram?.botToken && raw?.telegram?.chatId) {
+      telegramConfig = {
+        botToken: String(raw.telegram.botToken),
+        chatId: Number(raw.telegram.chatId),
+      };
+    }
+  } catch {
+    // No config file or invalid — Telegram disabled
+  }
+}
 
 // ---- Sanitization (CRITICAL: prevents osascript command injection) ----
 
@@ -11,6 +38,37 @@ function sanitizeForAppleScript(str: string): string {
     .replace(/\n/g, ' ')
     .replace(/\r/g, '')
     .slice(0, MAX_NOTIFICATION_LENGTH);
+}
+
+// ---- Telegram sender ----
+
+function sendTelegram(title: string, body: string): void {
+  if (!telegramConfig) return;
+
+  const text = `*${title}*\n${body}`;
+  const payload = JSON.stringify({
+    chat_id: telegramConfig.chatId,
+    text,
+    parse_mode: 'Markdown',
+  });
+
+  const req = request(
+    {
+      hostname: 'api.telegram.org',
+      path: `/bot${telegramConfig.botToken}/sendMessage`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+      timeout: 10000,
+    },
+    () => {} // fire and forget
+  );
+
+  req.on('error', () => {}); // silently ignore errors
+  req.write(payload);
+  req.end();
 }
 
 // ---- Deduplication ----
@@ -46,6 +104,10 @@ function processQueue(): void {
     processQueue();
   };
 
+  // Always send to Telegram (async, non-blocking)
+  sendTelegram(item.title, item.body);
+
+  // macOS notification
   if (process.platform === 'darwin') {
     const safeTitle = sanitizeForAppleScript(item.title);
     const safeBody = sanitizeForAppleScript(item.body);
@@ -60,7 +122,7 @@ function processQueue(): void {
       done,
     );
   } else {
-    done(); // unsupported platform
+    done();
   }
 }
 
@@ -79,7 +141,6 @@ export function isNotificationsEnabled(): boolean {
 export function sendNotification(event: NotificationEvent): void {
   if (!enabled) return;
   if (isDuplicate(event.dedupeKey)) return;
-  // Play sound for idle/needs_input notifications (action required)
   const sound = event.type === 'agent_idle' || event.type === 'needs_input';
   queue.push({ title: event.title, body: event.body, sound });
   processQueue();

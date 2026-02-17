@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { withFullScreen } from 'fullscreen-ink';
 import App from './app.js';
 import { DEFAULT_CLAUDE_DIR } from './constants.js';
+import { loadTelegramConfig } from './notify.js';
 
 const HELP = `Claude Orchestra — Terminal dashboard for Claude Code sessions
 
@@ -36,6 +37,9 @@ if (!process.stdin.isTTY) {
   console.error('Error: claude-orchestra requires an interactive terminal (TTY).');
   process.exit(1);
 }
+
+// Load Telegram config from project root (config.json)
+loadTelegramConfig(new URL('..', import.meta.url).pathname);
 
 const { start, waitUntilExit } = withFullScreen(<App claudeDir={claudeDir} />);
 
