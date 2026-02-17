@@ -31,17 +31,8 @@ function shortId(id: string): string {
 
 function sessionStatus(session: ActiveSession): { label: string; color: string; dot: string } {
   const age = Date.now() - session.lastActivityMs;
-  const lastEntry = session.entries[session.entries.length - 1];
-
-  if (age < 30_000) {
-    // File modified in last 30s — actively working
-    if (lastEntry?.type === 'tool_use') return { label: 'working', color: 'green', dot: '◉' };
-    if (lastEntry?.type === 'assistant') return { label: 'responding', color: 'green', dot: '◉' };
-    return { label: 'active', color: 'green', dot: '●' };
-  }
-  if (age < 2 * 60_000) return { label: 'active', color: 'green', dot: '●' };
-  if (age < 5 * 60_000) return { label: 'waiting', color: 'yellow', dot: '●' };
-  return { label: 'idle', color: 'gray', dot: '○' };
+  if (age < 60_000) return { label: 'working', color: 'green', dot: '●' };
+  return { label: 'idle', color: 'yellow', dot: '○' };
 }
 
 function sessionLabel(session: ActiveSession): string {
