@@ -1,6 +1,21 @@
-// ---- Panel IDs ----
+// ---- Active Sessions ----
 
-export type PanelId = 'teams' | 'tasks' | 'messages';
+export interface SessionEntry {
+  type: 'user' | 'assistant' | 'tool_use';
+  timestamp: number;
+  text: string;
+  toolName?: string;
+}
+
+export interface ActiveSession {
+  sessionId: string;
+  project: string;
+  jsonlPath: string;
+  lastActivityMs: number;
+  cwd?: string;
+  model?: string;
+  entries: SessionEntry[];
+}
 
 // ---- Teams ----
 
@@ -78,17 +93,12 @@ export interface StatsData {
 // ---- App State ----
 
 export interface DataState {
+  sessions: ActiveSession[];
   teams: Team[];
   taskGroups: TaskGroup[];
   messages: Message[];
   stats: StatsData;
   loading: boolean;
-}
-
-export interface UIState {
-  focusedPanel: PanelId;
-  notificationsEnabled: boolean;
-  scrollPositions: Record<PanelId, number>;
 }
 
 // ---- Notifications ----

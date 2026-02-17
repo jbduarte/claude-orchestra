@@ -1,14 +1,17 @@
 import { useReducer, useEffect, useRef, useCallback } from 'react';
 import chokidar from 'chokidar';
-import type { DataState, DataAction, NotificationEvent, Message } from './types.js';
+import type { DataState, DataAction, NotificationEvent, Message, ActiveSession } from './types.js';
 import { readAllData, enrichTeamStatuses } from './parsers.js';
 import type { FileCache } from './parsers.js';
-import { DEBOUNCE_MS, AWAIT_WRITE_STABILITY_MS, AWAIT_WRITE_POLL_MS, NOTIFICATION_DEDUP_MS } from './constants.js';
+import { findActiveSessions } from './sessions.js';
+import type { SessionCache } from './sessions.js';
+import { DEBOUNCE_MS, AWAIT_WRITE_STABILITY_MS, AWAIT_WRITE_POLL_MS } from './constants.js';
 import { sendNotification } from './notify.js';
 
 // ---- Data reducer ----
 
 const initialDataState: DataState = {
+  sessions: [],
   teams: [],
   taskGroups: [],
   messages: [],
@@ -71,6 +74,26 @@ function computeNotifications(
     }
   }
 
+  // Detect new session activity (session has new entries)
+  const prevSessionSizes = new Map<string, number>();
+  for (const s of prev.sessions) {
+    prevSessionSizes.set(s.sessionId, s.entries.length);
+  }
+  for (const s of next.sessions) {
+    const prevSize = prevSessionSizes.get(s.sessionId) ?? 0;
+    if (s.entries.length > prevSize && prevSize > 0) {
+      const lastEntry = s.entries[s.entries.length - 1];
+      if (lastEntry && lastEntry.type === 'assistant') {
+        events.push({
+          type: 'new_message',
+          title: `Session: ${s.project}`,
+          body: lastEntry.text.slice(0, 100),
+          dedupeKey: `session:${s.sessionId}:${lastEntry.timestamp}`,
+        });
+      }
+    }
+  }
+
   // Detect messages needing input (plan approval, shutdown)
   const prevNeedsInput = new Set(
     prev.messages
@@ -101,15 +124,16 @@ function computeNotifications(
 export function useClaudeData(claudeDir: string): DataState & { forceRefresh: () => void } {
   const [data, dispatch] = useReducer(dataReducer, initialDataState);
   const cacheRef = useRef<FileCache>(new Map());
+  const sessionCacheRef = useRef<SessionCache>(new Map());
   const dataRef = useRef<Omit<DataState, 'loading'> | null>(null);
   const notifEnabled = useRef(true);
   const debouncedRef = useRef<ReturnType<typeof debounce> | null>(null);
 
   const doRefresh = useCallback(() => {
     const raw = readAllData(claudeDir, cacheRef.current);
-    // Enrich team member statuses from messages
     const teams = enrichTeamStatuses(raw.teams, raw.messages);
-    const newData = { ...raw, teams };
+    const sessions = findActiveSessions(claudeDir, sessionCacheRef.current);
+    const newData = { ...raw, teams, sessions };
 
     // Compute notification diff BEFORE dispatch
     if (notifEnabled.current) {
@@ -132,7 +156,7 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
       followSymlinks: false,
       depth: 4,
       ignored: [
-        /(^|[/\\])\../, // dotfiles (except directories we need)
+        /(^|[/\\])\../, // dotfiles
         /debug\//,
         /file-history\//,
         /shell-snapshots\//,
@@ -144,6 +168,7 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
         /downloads\//,
         /session-env\//,
         /ide\//,
+        /subagents\//,
       ],
       awaitWriteFinish: {
         stabilityThreshold: AWAIT_WRITE_STABILITY_MS,
@@ -176,10 +201,4 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
   }, [doRefresh]);
 
   return { ...data, forceRefresh };
-}
-
-// ---- Notifications toggle (exposed for the UI) ----
-export function setNotificationsEnabled(enabled: boolean) {
-  // This is a simple module-level flag
-  // In a real app you'd use context, but this is fine for MVP
 }

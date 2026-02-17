@@ -256,7 +256,7 @@ export function parseStats(claudeDir: string, cache: FileCache): StatsData {
 
 // ---- Read all data in one pass ----
 
-export function readAllData(claudeDir: string, cache: FileCache): Omit<DataState, 'loading'> {
+export function readAllData(claudeDir: string, cache: FileCache): Omit<DataState, 'loading' | 'sessions'> {
   return {
     teams: parseAllTeams(claudeDir, cache),
     taskGroups: parseAllTasks(claudeDir, cache),
