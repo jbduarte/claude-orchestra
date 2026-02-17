@@ -4,6 +4,7 @@ import { Spinner } from '@inkjs/ui';
 import { FullScreenBox, useScreenSize } from 'fullscreen-ink';
 import { useClaudeData } from './hooks.js';
 import { setNotificationsEnabled } from './notify.js';
+import { sendToSession } from './chat.js';
 import { MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT } from './constants.js';
 import { homedir } from 'node:os';
 import type { ActiveSession, SessionEntry } from './types.js';
@@ -36,7 +37,6 @@ function sessionStatus(session: ActiveSession): { label: string; color: string; 
 }
 
 function sessionLabel(session: ActiveSession): string {
-  // Prefer cwd-based name, then project, then short ID
   if (session.cwd) {
     if (session.cwd === HOME) return '~';
     if (session.cwd.startsWith(HOME + '/')) {
@@ -141,9 +141,6 @@ function ConversationView({
 
   const entries = session.entries;
   const totalEntries = entries.length;
-
-  // Compute which entries to show based on scroll
-  // scrollOffset 0 = show latest (bottom), positive = scroll up
   const endIdx = Math.max(0, totalEntries - scrollOffset);
   const startIdx = Math.max(0, endIdx - visibleRows);
   const visible = entries.slice(startIdx, endIdx);
@@ -179,7 +176,7 @@ function EntryLine({ entry }: { entry: SessionEntry }): ReactNode {
       return (
         <Text wrap="truncate-end">
           {time}
-          <Text color="green" bold>You  </Text>
+          <Text color="green" bold>You    </Text>
           <Text>{entry.text.split('\n')[0]?.slice(0, 200)}</Text>
         </Text>
       );
@@ -212,17 +209,55 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [scrollOffset, setScrollOffset] = useState(0);
   const [notificationsOn, setNotificationsOn] = useState(true);
+  const [inputMode, setInputMode] = useState(false);
+  const [inputText, setInputText] = useState('');
+  const [statusMsg, setStatusMsg] = useState('');
 
-  // Keep selectedIdx in bounds
   const safeIdx = sessions.length > 0 ? Math.min(selectedIdx, sessions.length - 1) : 0;
   const selectedSession = sessions[safeIdx] ?? null;
-
-  // Approximate visible rows for conversation (height minus header/status/borders)
-  const visibleRows = Math.max(5, height - 4);
+  const visibleRows = Math.max(5, height - 5);
 
   useInput((input, key) => {
+    // ---- Input mode: typing a message ----
+    if (inputMode) {
+      if (key.escape) {
+        setInputMode(false);
+        setInputText('');
+        return;
+      }
+      if (key.return) {
+        if (inputText.trim() && selectedSession?.cwd) {
+          const result = sendToSession(selectedSession.cwd, inputText.trim());
+          if (result.success) {
+            setStatusMsg(`Sent to ${sessionLabel(selectedSession)}`);
+          } else {
+            setStatusMsg(`Failed: ${result.error}`);
+          }
+        }
+        setInputMode(false);
+        setInputText('');
+        setTimeout(() => setStatusMsg(''), 5000);
+        return;
+      }
+      if (key.backspace || key.delete) {
+        setInputText((prev) => prev.slice(0, -1));
+        return;
+      }
+      // Regular character input
+      if (input && !key.ctrl && !key.meta) {
+        setInputText((prev) => prev + input);
+      }
+      return;
+    }
+
+    // ---- Normal mode ----
     if (input === 'q') {
       exit();
+      return;
+    }
+    if (input === 'i') {
+      setInputMode(true);
+      setInputText('');
       return;
     }
     if (input === 'n') {
@@ -238,7 +273,6 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
       return;
     }
 
-    // Number keys: jump to session
     const num = parseInt(input, 10);
     if (num >= 1 && num <= 9 && num <= sessions.length) {
       setSelectedIdx(num - 1);
@@ -246,7 +280,6 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
       return;
     }
 
-    // Tab: cycle sessions
     if (key.tab) {
       if (sessions.length > 0) {
         if (key.shift) {
@@ -259,7 +292,6 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
       return;
     }
 
-    // Up/Down: scroll conversation
     if (key.upArrow) {
       setScrollOffset((prev) =>
         Math.min(prev + 3, (selectedSession?.entries.length ?? 0) - visibleRows)
@@ -270,8 +302,6 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
       setScrollOffset((prev) => Math.max(0, prev - 3));
       return;
     }
-
-    // Home/End: jump to start/end of conversation
     if (key.home || input === 'g') {
       setScrollOffset(Math.max(0, (selectedSession?.entries.length ?? 0) - visibleRows));
       return;
@@ -282,7 +312,6 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
     }
   });
 
-  // Min size check
   if (width < MIN_TERMINAL_WIDTH || height < MIN_TERMINAL_HEIGHT) {
     return (
       <FullScreenBox justifyContent="center" alignItems="center">
@@ -309,18 +338,17 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
         <Text dimColor>
           {' '}— {sessions.length} active session{sessions.length !== 1 ? 's' : ''}
         </Text>
+        {statusMsg ? <Text color="green"> {statusMsg}</Text> : null}
       </Box>
 
       {/* Main: sidebar + conversation */}
       <Box flexGrow={1}>
-        {/* Left sidebar: session list */}
         <Box width={24} borderStyle="round" borderColor="gray" flexDirection="column">
           <ErrorBoundary fallback="[Error]">
             <SessionList sessions={sessions} selectedIndex={safeIdx} />
           </ErrorBoundary>
         </Box>
 
-        {/* Right: conversation view */}
         <Box flexGrow={1} borderStyle="round" borderColor="cyan" flexDirection="column">
           <ErrorBoundary fallback="[Error]">
             <ConversationView
@@ -332,11 +360,20 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
         </Box>
       </Box>
 
-      {/* Status bar */}
+      {/* Input bar / Status bar */}
       <Box paddingX={1}>
-        <Text dimColor>
-          Tab:switch ↑↓:scroll 1-9:session g/G:top/bottom q:quit n:notif({notificationsOn ? 'ON' : 'OFF'}) r:refresh
-        </Text>
+        {inputMode ? (
+          <Text>
+            <Text color="green" bold>{'> '}</Text>
+            <Text>{inputText}</Text>
+            <Text dimColor>█</Text>
+            <Text dimColor>  (Enter:send Esc:cancel)</Text>
+          </Text>
+        ) : (
+          <Text dimColor>
+            Tab:switch ↑↓:scroll i:chat q:quit n:notif({notificationsOn ? 'ON' : 'OFF'}) r:refresh
+          </Text>
+        )}
       </Box>
     </FullScreenBox>
   );
