@@ -182,6 +182,43 @@ function getRunningClaudeCwds(): Set<string> {
   return cwds;
 }
 
+// ---- Orphaned process cleanup ----
+// Kill child processes spawned by Claude sessions that no longer exist.
+// These are identified by: command contains ".claude/shell-snapshots/" AND ppid=1
+// (re-parented to launchd/init after the parent claude process exited).
+
+let lastCleanupAt = 0;
+const CLEANUP_INTERVAL_MS = 60_000; // Run cleanup at most once per minute
+
+function cleanupOrphanedProcesses(): void {
+  const now = Date.now();
+  if (now - lastCleanupAt < CLEANUP_INTERVAL_MS) return;
+  lastCleanupAt = now;
+
+  try {
+    // Find processes with .claude/shell-snapshots/ in their command line
+    const output = execSync(
+      'ps -eo pid=,ppid=,command= 2>/dev/null || true',
+      { encoding: 'utf-8', timeout: 5000 }
+    );
+
+    for (const line of output.split('\n')) {
+      if (!line.includes('.claude/shell-snapshots/')) continue;
+
+      const parts = line.trim().split(/\s+/);
+      const pid = parseInt(parts[0] ?? '', 10);
+      const ppid = parseInt(parts[1] ?? '', 10);
+
+      // ppid=1 means parent died — orphaned process
+      if (!isNaN(pid) && ppid === 1 && pid !== process.pid) {
+        try {
+          process.kill(pid, 'SIGTERM');
+        } catch { /* already dead or permission denied */ }
+      }
+    }
+  } catch { /* ignore */ }
+}
+
 // ---- Main: find active sessions ----
 
 export function findActiveSessions(claudeDir: string, cache: SessionCache): ActiveSession[] {
@@ -280,6 +317,9 @@ export function findActiveSessions(claudeDir: string, cache: SessionCache): Acti
       }
     }
   }
+
+  // Clean up orphaned child processes from closed sessions
+  cleanupOrphanedProcesses();
 
   // Filter out closed sessions (no process) after grace period
   const now2 = Date.now();
