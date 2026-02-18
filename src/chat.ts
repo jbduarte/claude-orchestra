@@ -79,28 +79,35 @@ function findProcessForSession(sessionCwd: string): ProcessInfo | null {
 
 // ---- Walk up process tree to find the owning GUI app ----
 
-function findParentApp(pid: number): string | null {
-  const knownApps: Record<string, string> = {
-    'terminal': 'Terminal',
-    'iterm2': 'iTerm2',
-    'iterm': 'iTerm',
-    'alacritty': 'Alacritty',
-    'kitty': 'kitty',
-    'wezterm-gui': 'WezTerm',
-    'warp': 'Warp',
-    'hyper': 'Hyper',
+interface AppInfo {
+  displayName: string;   // For tell application (e.g. "PyCharm")
+  processName: string;   // For System Events process (e.g. "pycharm")
+}
+
+function findParentApp(pid: number): AppInfo | null {
+  // Known terminal apps: comm substring → { displayName, processName }
+  const knownApps: Record<string, AppInfo> = {
+    'terminal': { displayName: 'Terminal', processName: 'Terminal' },
+    'iterm2': { displayName: 'iTerm2', processName: 'iTerm2' },
+    'iterm': { displayName: 'iTerm', processName: 'iTerm2' },
+    'alacritty': { displayName: 'Alacritty', processName: 'Alacritty' },
+    'kitty': { displayName: 'kitty', processName: 'kitty' },
+    'wezterm-gui': { displayName: 'WezTerm', processName: 'WezTerm' },
+    'warp': { displayName: 'Warp', processName: 'Warp' },
+    'hyper': { displayName: 'Hyper', processName: 'Hyper' },
   };
 
-  const idePatterns: Array<{ pattern: RegExp; app: string }> = [
-    { pattern: /pycharm/i, app: 'PyCharm' },
-    { pattern: /idea/i, app: 'IntelliJ IDEA' },
-    { pattern: /webstorm/i, app: 'WebStorm' },
-    { pattern: /goland/i, app: 'GoLand' },
-    { pattern: /clion/i, app: 'CLion' },
-    { pattern: /rubymine/i, app: 'RubyMine' },
-    { pattern: /rider/i, app: 'Rider' },
-    { pattern: /code/i, app: 'Visual Studio Code' },
-    { pattern: /cursor/i, app: 'Cursor' },
+  // IDE patterns: need to resolve actual System Events process name at runtime
+  const idePatterns: Array<{ pattern: RegExp; displayName: string }> = [
+    { pattern: /pycharm/i, displayName: 'PyCharm' },
+    { pattern: /idea/i, displayName: 'IntelliJ IDEA' },
+    { pattern: /webstorm/i, displayName: 'WebStorm' },
+    { pattern: /goland/i, displayName: 'GoLand' },
+    { pattern: /clion/i, displayName: 'CLion' },
+    { pattern: /rubymine/i, displayName: 'RubyMine' },
+    { pattern: /rider/i, displayName: 'Rider' },
+    { pattern: /code/i, displayName: 'Visual Studio Code' },
+    { pattern: /cursor/i, displayName: 'Cursor' },
   ];
 
   try {
@@ -116,11 +123,15 @@ function findParentApp(pid: number): string | null {
       const ppid = parseInt(info.split(/\s+/)[0] ?? '', 10);
       const comm = info.replace(/^\s*\d+\s+/, '').toLowerCase();
 
-      for (const [key, appName] of Object.entries(knownApps)) {
-        if (comm.includes(key)) return appName;
+      for (const [key, appInfo] of Object.entries(knownApps)) {
+        if (comm.includes(key)) return appInfo;
       }
-      for (const { pattern, app } of idePatterns) {
-        if (pattern.test(comm)) return app;
+      for (const { pattern, displayName } of idePatterns) {
+        if (pattern.test(comm)) {
+          // Resolve the actual System Events process name
+          const seName = resolveSystemEventsName(displayName);
+          return { displayName, processName: seName ?? displayName };
+        }
       }
 
       if (isNaN(ppid) || ppid <= 1) break;
@@ -129,6 +140,28 @@ function findParentApp(pid: number): string | null {
   } catch {
     // Ignore errors
   }
+
+  return null;
+}
+
+// Resolve the actual System Events process name for an app
+function resolveSystemEventsName(displayName: string): string | null {
+  try {
+    const result = execSync(
+      `osascript -e 'tell application "System Events" to get name of first process whose name contains "${escapeForAppleScript(displayName.toLowerCase())}"' 2>/dev/null`,
+      { encoding: 'utf-8', timeout: 3000 }
+    ).trim();
+    if (result) return result;
+  } catch { /* ignore */ }
+
+  // Fallback: try lowercase
+  try {
+    const result = execSync(
+      `osascript -e 'tell application "System Events" to get name of first process whose displayed name contains "${escapeForAppleScript(displayName)}"' 2>/dev/null`,
+      { encoding: 'utf-8', timeout: 3000 }
+    ).trim();
+    if (result) return result;
+  } catch { /* ignore */ }
 
   return null;
 }
@@ -187,17 +220,18 @@ function sendViaTerminal(ttyDevice: string, message: string): boolean {
 
 // ---- Focus + send for apps with window title matching (IDEs, etc.) ----
 
-function sendViaAppWindow(appName: string, projectName: string, message: string): boolean {
+function sendViaAppWindow(app: AppInfo, projectName: string, message: string): boolean {
   const escaped = escapeForAppleScript(message);
   const escapedProject = escapeForAppleScript(projectName);
-  const escapedApp = escapeForAppleScript(appName);
+  const escapedDisplayName = escapeForAppleScript(app.displayName);
+  const escapedProcessName = escapeForAppleScript(app.processName);
 
   // Find the window whose title contains the project name, raise it, then type
   const script = `
-    tell application "${escapedApp}" to activate
+    tell application "${escapedDisplayName}" to activate
     delay 0.3
     tell application "System Events"
-      tell process "${escapedApp}"
+      tell process "${escapedProcessName}"
         set targetWindow to missing value
         set allWindows to every window
         repeat with w in allWindows
@@ -230,15 +264,16 @@ function sendViaAppWindow(appName: string, projectName: string, message: string)
 
 // ---- Fallback: just activate the app and type (single-window apps) ----
 
-function sendViaAppGeneric(appName: string, message: string): boolean {
+function sendViaAppGeneric(app: AppInfo, message: string): boolean {
   const escaped = escapeForAppleScript(message);
-  const escapedApp = escapeForAppleScript(appName);
+  const escapedDisplayName = escapeForAppleScript(app.displayName);
+  const escapedProcessName = escapeForAppleScript(app.processName);
 
   const script = `
-    tell application "${escapedApp}" to activate
+    tell application "${escapedDisplayName}" to activate
     delay 0.5
     tell application "System Events"
-      tell process "${escapedApp}"
+      tell process "${escapedProcessName}"
         keystroke "${escaped}"
         delay 0.3
         key code 36
@@ -295,15 +330,16 @@ function focusTerminalTab(ttyDevice: string): boolean {
 
 // ---- Focus app window by project name ----
 
-function focusAppWindow(appName: string, projectName: string): boolean {
-  const escapedApp = escapeForAppleScript(appName);
+function focusAppWindow(app: AppInfo, projectName: string): boolean {
+  const escapedDisplayName = escapeForAppleScript(app.displayName);
+  const escapedProcessName = escapeForAppleScript(app.processName);
   const escapedProject = escapeForAppleScript(projectName);
 
   const script = `
-    tell application "${escapedApp}" to activate
+    tell application "${escapedDisplayName}" to activate
     delay 0.2
     tell application "System Events"
-      tell process "${escapedApp}"
+      tell process "${escapedProcessName}"
         set allWindows to every window
         repeat with w in allWindows
           if name of w contains "${escapedProject}" then
@@ -329,9 +365,9 @@ function focusAppWindow(appName: string, projectName: string): boolean {
 
 // ---- Focus any app by name ----
 
-function focusApp(appName: string): boolean {
+function focusApp(app: AppInfo): boolean {
   try {
-    execSync(`osascript -e 'tell application "${escapeForAppleScript(appName)}" to activate'`, {
+    execSync(`osascript -e 'tell application "${escapeForAppleScript(app.displayName)}" to activate'`, {
       encoding: 'utf-8',
       timeout: 5000,
     });
@@ -354,7 +390,7 @@ export function focusSession(sessionCwd: string): { success: boolean; error?: st
   const projectName = projectNameFromCwd(sessionCwd);
 
   // Terminal.app: use TTY-based tab matching
-  if ((!app || app === 'Terminal') && focusTerminalTab(ttyDevice)) {
+  if ((!app || app.displayName === 'Terminal') && focusTerminalTab(ttyDevice)) {
     return { success: true };
   }
 
@@ -385,7 +421,7 @@ export function sendToSession(sessionCwd: string, message: string): { success: b
 
   let success = false;
 
-  if (!app || app === 'Terminal') {
+  if (!app || app.displayName === 'Terminal') {
     // Terminal.app: use TTY-based tab targeting (most precise)
     success = sendViaTerminal(ttyDevice, message);
   } else {
@@ -400,7 +436,7 @@ export function sendToSession(sessionCwd: string, message: string): { success: b
   if (success) {
     return { success: true };
   }
-  return { success: false, error: `Failed to send to ${app ?? 'Terminal'}` };
+  return { success: false, error: `Failed to send to ${app?.displayName ?? 'Terminal'}` };
 }
 
 // ---- Public: start a new Claude session in a new Terminal tab ----
