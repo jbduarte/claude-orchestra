@@ -150,33 +150,22 @@ function getRunningClaudeCwds(): Set<string> {
 
   const cwds = new Set<string>();
   try {
-    // Try exact name first, then fall back to command-line match
-    // Exclude our own process (claude-orchestra) via grep -v
+    // Only match processes whose executable is exactly "claude"
+    // This excludes child processes (R scripts, shell commands, sleep, etc.)
+    // that happen to have "claude" in their path arguments
     const psOutput = execSync(
-      '(pgrep -x claude 2>/dev/null; pgrep -f "claude" 2>/dev/null) | sort -u',
+      'pgrep -x claude 2>/dev/null || true',
       { encoding: 'utf-8', timeout: 3000 }
     ).trim();
 
-    const myPid = process.pid;
-    const parentPid = process.ppid;
     const pids = psOutput
       .split('\n')
       .filter(Boolean)
       .map(p => parseInt(p, 10))
-      .filter(n => !isNaN(n) && n !== myPid && n !== parentPid);
+      .filter(n => !isNaN(n));
 
     for (const pid of pids) {
       try {
-        // Verify this is actually a claude process, not just something with "claude" in the path
-        const cmdline = execSync(
-          `ps -o command= -p ${pid} 2>/dev/null || true`,
-          { encoding: 'utf-8', timeout: 2000 }
-        ).trim();
-
-        // Skip claude-orchestra and other non-Claude-Code processes
-        if (!cmdline || cmdline.includes('claude-orchestra') || cmdline.includes('tsx')) continue;
-        if (!cmdline.includes('claude')) continue;
-
         const lsofOutput = execSync(
           `lsof -a -p ${pid} -d cwd -Fn 2>/dev/null || true`,
           { encoding: 'utf-8', timeout: 2000 }
