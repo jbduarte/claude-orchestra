@@ -18,13 +18,13 @@ Watches `~/.claude/` for active sessions, teams, tasks, and agent messages — r
 ## Install
 
 ```sh
-npm install -g claude-orchestra
+npm install -g @jbduarte/claude-orchestra
 ```
 
 Or run directly:
 
 ```sh
-npx claude-orchestra
+npx @jbduarte/claude-orchestra
 ```
 
 ## Usage

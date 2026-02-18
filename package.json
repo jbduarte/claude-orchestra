@@ -1,15 +1,19 @@
 {
-  "name": "claude-orchestra",
+  "name": "@jbduarte/claude-orchestra",
   "version": "1.0.0",
   "description": "Terminal dashboard for managing multiple Claude Code sessions in parallel",
   "type": "module",
   "bin": {
     "claude-orchestra": "./dist/index.js"
   },
+  "files": [
+    "dist/"
+  ],
   "scripts": {
     "start": "tsx src/index.tsx",
     "build": "tsc",
-    "dev": "tsx --watch src/index.tsx"
+    "dev": "tsx --watch src/index.tsx",
+    "prepublishOnly": "npm run build"
   },
   "repository": {
     "type": "git",
