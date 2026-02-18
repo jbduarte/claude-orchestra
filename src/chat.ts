@@ -227,6 +227,7 @@ function sendViaAppWindow(app: AppInfo, projectName: string, message: string): b
   const escapedProcessName = escapeForAppleScript(app.processName);
 
   // Find the window whose title contains the project name, raise it, then type
+  // ONLY sends keystrokes if the matching window is found — never to a random window
   const script = `
     tell application "${escapedDisplayName}" to activate
     delay 0.3
@@ -240,40 +241,11 @@ function sendViaAppWindow(app: AppInfo, projectName: string, message: string): b
             exit repeat
           end if
         end repeat
-        if targetWindow is not missing value then
-          perform action "AXRaise" of targetWindow
-          delay 0.3
+        if targetWindow is missing value then
+          error "No window found for ${escapedProject}"
         end if
-        keystroke "${escaped}"
+        perform action "AXRaise" of targetWindow
         delay 0.3
-        key code 36
-      end tell
-    end tell
-  `;
-
-  try {
-    execSync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, {
-      encoding: 'utf-8',
-      timeout: 10000,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// ---- Fallback: just activate the app and type (single-window apps) ----
-
-function sendViaAppGeneric(app: AppInfo, message: string): boolean {
-  const escaped = escapeForAppleScript(message);
-  const escapedDisplayName = escapeForAppleScript(app.displayName);
-  const escapedProcessName = escapeForAppleScript(app.processName);
-
-  const script = `
-    tell application "${escapedDisplayName}" to activate
-    delay 0.5
-    tell application "System Events"
-      tell process "${escapedProcessName}"
         keystroke "${escaped}"
         delay 0.3
         key code 36
@@ -363,20 +335,6 @@ function focusAppWindow(app: AppInfo, projectName: string): boolean {
   }
 }
 
-// ---- Focus any app by name ----
-
-function focusApp(app: AppInfo): boolean {
-  try {
-    execSync(`osascript -e 'tell application "${escapeForAppleScript(app.displayName)}" to activate'`, {
-      encoding: 'utf-8',
-      timeout: 5000,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 // ---- Public: focus a session's window ----
 
 export function focusSession(sessionCwd: string): { success: boolean; error?: string } {
@@ -394,17 +352,12 @@ export function focusSession(sessionCwd: string): { success: boolean; error?: st
     return { success: true };
   }
 
-  // IDEs and multi-window apps: match by window title
+  // IDEs and multi-window apps: match by window title (no fallback — never focus wrong window)
   if (app && focusAppWindow(app, projectName)) {
     return { success: true };
   }
 
-  // Fallback: just activate the app
-  if (app && focusApp(app)) {
-    return { success: true };
-  }
-
-  return { success: false, error: `Could not find window for ${ttyDevice}` };
+  return { success: false, error: `Session window not found — it may have closed, Maestro` };
 }
 
 // ---- Public: send a message to a session ----
@@ -425,18 +378,14 @@ export function sendToSession(sessionCwd: string, message: string): { success: b
     // Terminal.app: use TTY-based tab targeting (most precise)
     success = sendViaTerminal(ttyDevice, message);
   } else {
-    // IDEs and multi-window apps: match window by project name
+    // IDEs and multi-window apps: match window by project name (no fallback — never send to wrong window)
     success = sendViaAppWindow(app, projectName, message);
-    // Fallback to generic if window matching fails
-    if (!success) {
-      success = sendViaAppGeneric(app, message);
-    }
   }
 
   if (success) {
     return { success: true };
   }
-  return { success: false, error: `Failed to send to ${app?.displayName ?? 'Terminal'}` };
+  return { success: false, error: `Session window not found — it may have closed, Maestro` };
 }
 
 // ---- Public: start a new Claude session in a new Terminal tab ----
