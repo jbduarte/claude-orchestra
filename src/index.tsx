@@ -51,3 +51,5 @@ process.on('SIGTERM', () => { stopTelegramBot(); process.exit(0); });
 
 await start();
 await waitUntilExit();
+stopTelegramBot();
+process.exit(0);

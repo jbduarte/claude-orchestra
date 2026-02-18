@@ -108,6 +108,7 @@ export interface NotificationEvent {
   title: string;
   body: string;
   dedupeKey: string;
+  telegramBody?: string;
 }
 
 // ---- Reducer actions ----

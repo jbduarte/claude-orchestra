@@ -3,7 +3,7 @@ import chokidar from 'chokidar';
 import type { DataState, DataAction, NotificationEvent, Message, ActiveSession } from './types.js';
 import { readAllData, enrichTeamStatuses } from './parsers.js';
 import type { FileCache } from './parsers.js';
-import { findActiveSessions } from './sessions.js';
+import { findActiveSessions, readLastAssistantText } from './sessions.js';
 import type { SessionCache } from './sessions.js';
 import { DEBOUNCE_MS, AWAIT_WRITE_STABILITY_MS, AWAIT_WRITE_POLL_MS, AUTO_REFRESH_MS } from './constants.js';
 import { sendNotification } from './notify.js';
@@ -84,11 +84,13 @@ function computeNotifications(
     if (s.entries.length > prevSize && prevSize > 0) {
       const lastEntry = s.entries[s.entries.length - 1];
       if (lastEntry && lastEntry.type === 'assistant') {
+        const fullText = readLastAssistantText(s.jsonlPath);
         events.push({
           type: 'new_message',
           title: `Session: ${s.project}`,
           body: lastEntry.text.slice(0, 100),
           dedupeKey: `session:${s.sessionId}:${lastEntry.timestamp}`,
+          telegramBody: fullText ?? undefined,
         });
       }
     }
