@@ -1,4 +1,5 @@
 import { openSync, readSync, closeSync, statSync, fstatSync, readdirSync, existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import type { ActiveSession, SessionEntry } from './types.js';
@@ -82,6 +83,45 @@ function parseLine(line: string): { entries: SessionEntry[]; cwd?: string; model
   }
 }
 
+// ---- Read full last assistant message (untruncated, for Telegram) ----
+
+const LAST_MSG_TAIL_BYTES = 1024 * 1024; // 1MB — enough to capture long reports
+
+export function readLastAssistantText(jsonlPath: string): string | null {
+  try {
+    const tail = tailFile(jsonlPath, LAST_MSG_TAIL_BYTES);
+    const lines = tail.split('\n');
+
+    // Walk backwards to find the last assistant message with text blocks
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]?.trim();
+      if (!line) continue;
+
+      try {
+        const raw = JSON.parse(line);
+        if (raw.type !== 'assistant' || !Array.isArray(raw.message?.content)) continue;
+
+        const textParts: string[] = [];
+        for (const block of raw.message.content) {
+          if (block.type === 'text' && typeof block.text === 'string' && block.text.length > 0) {
+            textParts.push(block.text);
+          }
+        }
+
+        if (textParts.length > 0) {
+          return textParts.join('\n\n');
+        }
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    // File read error
+  }
+
+  return null;
+}
+
 // ---- Project name decoding ----
 
 const HOME = homedir();
@@ -94,6 +134,63 @@ function decodeProjectName(encoded: string): string {
     return encoded.slice(HOME_ENCODED.length + 1);
   }
   return encoded;
+}
+
+// ---- Process detection (filter out closed sessions) ----
+
+const IDLE_PROCESS_CHECK_MS = 2 * 60 * 1000;  // Start checking process after 2min idle
+const CLOSED_GRACE_MS = 5 * 60 * 1000;        // Keep closed sessions visible for 5min
+let cachedCwds: Set<string> | null = null;
+let cachedCwdsAt = 0;
+const PROCESS_CACHE_MS = 10_000; // Cache process list for 10s
+
+function getRunningClaudeCwds(): Set<string> {
+  const now = Date.now();
+  if (cachedCwds && now - cachedCwdsAt < PROCESS_CACHE_MS) return cachedCwds;
+
+  const cwds = new Set<string>();
+  try {
+    // Try exact name first, then fall back to command-line match
+    // Exclude our own process (claude-orchestra) via grep -v
+    const psOutput = execSync(
+      '(pgrep -x claude 2>/dev/null; pgrep -f "claude" 2>/dev/null) | sort -u',
+      { encoding: 'utf-8', timeout: 3000 }
+    ).trim();
+
+    const myPid = process.pid;
+    const parentPid = process.ppid;
+    const pids = psOutput
+      .split('\n')
+      .filter(Boolean)
+      .map(p => parseInt(p, 10))
+      .filter(n => !isNaN(n) && n !== myPid && n !== parentPid);
+
+    for (const pid of pids) {
+      try {
+        // Verify this is actually a claude process, not just something with "claude" in the path
+        const cmdline = execSync(
+          `ps -o command= -p ${pid} 2>/dev/null || true`,
+          { encoding: 'utf-8', timeout: 2000 }
+        ).trim();
+
+        // Skip claude-orchestra and other non-Claude-Code processes
+        if (!cmdline || cmdline.includes('claude-orchestra') || cmdline.includes('tsx')) continue;
+        if (!cmdline.includes('claude')) continue;
+
+        const lsofOutput = execSync(
+          `lsof -a -p ${pid} -d cwd -Fn 2>/dev/null || true`,
+          { encoding: 'utf-8', timeout: 2000 }
+        );
+        for (const line of lsofOutput.split('\n')) {
+          if (line.startsWith('n/')) cwds.add(line.slice(1));
+        }
+      } catch { /* skip */ }
+    }
+  } catch { /* no pgrep — return empty */ }
+
+  cachedCwds = cwds;
+  cachedCwdsAt = now;
+  return cwds;
 }
 
 // ---- Main: find active sessions ----
@@ -195,5 +292,26 @@ export function findActiveSessions(claudeDir: string, cache: SessionCache): Acti
     }
   }
 
-  return sessions.sort((a, b) => b.lastActivityMs - a.lastActivityMs);
+  // Filter out closed sessions (no process) after grace period
+  const now2 = Date.now();
+  const runningCwds = getRunningClaudeCwds();
+
+  function hasRunningProcess(cwd: string): boolean {
+    return runningCwds.has(cwd);
+  }
+
+  const alive = sessions.filter(s => {
+    const idleMs = now2 - s.lastActivityMs;
+
+    // Recently active — always keep
+    if (idleMs < IDLE_PROCESS_CHECK_MS) return true;
+
+    // Idle >2min — check if process is still running
+    if (s.cwd && hasRunningProcess(s.cwd)) return true;
+
+    // Process gone — keep for grace period (10min), then remove
+    return idleMs < CLOSED_GRACE_MS;
+  });
+
+  return alive.sort((a, b) => b.lastActivityMs - a.lastActivityMs);
 }
