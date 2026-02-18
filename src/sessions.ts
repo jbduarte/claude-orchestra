@@ -136,13 +136,16 @@ function decodeProjectName(encoded: string): string {
   return encoded;
 }
 
-// ---- Process detection (filter out closed sessions) ----
+// ---- Session liveness detection ----
+// Use `ps` to find running Claude processes and their CWDs.
+// NOTE: `pgrep -x claude` is unreliable on macOS (misses some processes).
+// `ps -eo pid=,comm=` is consistent and finds all of them.
 
-const IDLE_PROCESS_CHECK_MS = 2 * 60 * 1000;  // Start checking process after 2min idle
-const CLOSED_GRACE_MS = 5 * 60 * 1000;        // Keep closed sessions visible for 5min
+const IDLE_CHECK_MS = 5 * 60 * 1000;   // Start checking after 5min idle
+const CLOSED_GRACE_MS = 5 * 60 * 1000; // Keep closed sessions visible for 5min
 let cachedCwds: Set<string> | null = null;
 let cachedCwdsAt = 0;
-const PROCESS_CACHE_MS = 10_000; // Cache process list for 10s
+const PROCESS_CACHE_MS = 15_000;        // Cache for 15s
 
 function getRunningClaudeCwds(): Set<string> {
   const now = Date.now();
@@ -150,11 +153,9 @@ function getRunningClaudeCwds(): Set<string> {
 
   const cwds = new Set<string>();
   try {
-    // Only match processes whose executable is exactly "claude"
-    // This excludes child processes (R scripts, shell commands, sleep, etc.)
-    // that happen to have "claude" in their path arguments
+    // Use ps (not pgrep) — reliable across macOS versions
     const psOutput = execSync(
-      'pgrep -x claude 2>/dev/null || true',
+      "ps -eo pid=,comm= | awk '$NF == \"claude\" {print $1}'",
       { encoding: 'utf-8', timeout: 3000 }
     ).trim();
 
@@ -175,7 +176,7 @@ function getRunningClaudeCwds(): Set<string> {
         }
       } catch { /* skip */ }
     }
-  } catch { /* no pgrep — return empty */ }
+  } catch { /* ps failed — return empty */ }
 
   cachedCwds = cwds;
   cachedCwdsAt = now;
@@ -321,25 +322,21 @@ export function findActiveSessions(claudeDir: string, cache: SessionCache): Acti
   // Clean up orphaned child processes from closed sessions
   cleanupOrphanedProcesses();
 
-  // Filter out closed sessions (no process) after grace period
+  // Filter out closed sessions
   const now2 = Date.now();
   const runningCwds = getRunningClaudeCwds();
-
-  function hasRunningProcess(cwd: string): boolean {
-    return runningCwds.has(cwd);
-  }
 
   const alive = sessions.filter(s => {
     const idleMs = now2 - s.lastActivityMs;
 
-    // Recently active — always keep
-    if (idleMs < IDLE_PROCESS_CHECK_MS) return true;
+    // Recently active — always show (no process check needed)
+    if (idleMs < IDLE_CHECK_MS) return true;
 
-    // Idle >2min — check if process is still running
-    if (s.cwd && hasRunningProcess(s.cwd)) return true;
+    // Idle >5min — check if a Claude process is running with this CWD
+    if (s.cwd && runningCwds.has(s.cwd)) return true;
 
-    // Process gone — keep for grace period (10min), then remove
-    return idleMs < CLOSED_GRACE_MS;
+    // No matching process — session is closed. Keep for grace period, then remove.
+    return idleMs < IDLE_CHECK_MS + CLOSED_GRACE_MS;
   });
 
   return alive.sort((a, b) => b.lastActivityMs - a.lastActivityMs);
