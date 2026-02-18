@@ -108,10 +108,10 @@ function computeNotifications(
       if (!prevNeedsInput.has(key)) {
         events.push({
           type: 'needs_input',
-          title: 'Action Needed',
+          title: 'Awaiting the Maestro',
           body: m.parsedType === 'plan_approval_request'
-            ? `${m.from} needs plan approval`
-            : `${m.from} requests shutdown`,
+            ? `${m.from} awaits your approval on a plan, Maestro`
+            : `${m.from} requests permission to leave the stage`,
           dedupeKey: `needs_input:${key}`,
         });
       }
@@ -164,8 +164,8 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
             const label = s.cwd?.split('/').pop() ?? s.project;
             events.push({
               type: 'agent_idle',
-              title: 'Session Waiting',
-              body: `${label} is waiting for input`,
+              title: 'Awaiting the Maestro',
+              body: `${label} awaits your direction, Maestro`,
               dedupeKey: `idle:${s.sessionId}:${Math.floor(s.lastActivityMs / 60000)}`,
             });
           }
@@ -179,8 +179,8 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
           const label = s.cwd?.split('/').pop() ?? s.project;
           events.push({
             type: 'agent_idle',
-            title: 'Session Waiting',
-            body: `${label} is waiting for input`,
+            title: 'Awaiting the Maestro',
+            body: `${label} awaits your direction, Maestro`,
             dedupeKey: `idle:${s.sessionId}:${Math.floor(s.lastActivityMs / 60000)}`,
           });
         }
