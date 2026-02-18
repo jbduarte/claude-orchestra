@@ -42,14 +42,19 @@ function sanitizeForAppleScript(str: string): string {
 
 // ---- Telegram sender ----
 
-function sendTelegram(title: string, body: string): void {
+const TELEGRAM_MAX_LENGTH = 4096;
+
+function escHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function sendTelegramMessage(html: string): void {
   if (!telegramConfig) return;
 
-  const text = `*${title}*\n${body}`;
   const payload = JSON.stringify({
     chat_id: telegramConfig.chatId,
-    text,
-    parse_mode: 'Markdown',
+    text: html,
+    parse_mode: 'HTML',
   });
 
   const req = request(
@@ -63,12 +68,78 @@ function sendTelegram(title: string, body: string): void {
       },
       timeout: 10000,
     },
-    () => {} // fire and forget
+    (res) => {
+      // If HTML parse fails, retry as plain text
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        try {
+          const resp = JSON.parse(data);
+          if (!resp.ok) {
+            const plain = JSON.stringify({
+              chat_id: telegramConfig!.chatId,
+              text: html.replace(/<[^>]+>/g, ''),
+            });
+            const retry = request({
+              hostname: 'api.telegram.org',
+              path: `/bot${telegramConfig!.botToken}/sendMessage`,
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(plain) },
+              timeout: 10000,
+            }, () => {});
+            retry.on('error', () => {});
+            retry.write(plain);
+            retry.end();
+          }
+        } catch { /* ignore */ }
+      });
+    }
   );
 
-  req.on('error', () => {}); // silently ignore errors
+  req.on('error', () => {});
   req.write(payload);
   req.end();
+}
+
+function sendTelegram(title: string, body: string): void {
+  if (!telegramConfig) return;
+
+  const header = `<b>${escHtml(title)}</b>\n`;
+  const maxBody = TELEGRAM_MAX_LENGTH - header.length;
+
+  if (body.length <= maxBody) {
+    sendTelegramMessage(header + body);
+    return;
+  }
+
+  // Split long messages into chunks, breaking at newlines when possible
+  let remaining = body;
+  let partNum = 1;
+
+  while (remaining.length > 0) {
+    const partHeader = partNum === 1 ? header : `<b>${escHtml(title)} (cont.)</b>\n`;
+    const chunkSize = TELEGRAM_MAX_LENGTH - partHeader.length;
+    let chunk: string;
+
+    if (remaining.length <= chunkSize) {
+      chunk = remaining;
+      remaining = '';
+    } else {
+      // Try to break at a newline within the last 20% of the chunk
+      const searchStart = Math.floor(chunkSize * 0.8);
+      const breakIdx = remaining.lastIndexOf('\n', chunkSize);
+      if (breakIdx > searchStart) {
+        chunk = remaining.slice(0, breakIdx);
+        remaining = remaining.slice(breakIdx + 1);
+      } else {
+        chunk = remaining.slice(0, chunkSize);
+        remaining = remaining.slice(chunkSize);
+      }
+    }
+
+    sendTelegramMessage(partHeader + chunk);
+    partNum++;
+  }
 }
 
 // ---- Deduplication ----
@@ -92,7 +163,7 @@ function isDuplicate(key: string): boolean {
 // ---- Serialized dispatch (max 1 notification process at a time) ----
 
 let pending = false;
-const queue: Array<{ title: string; body: string; sound: boolean }> = [];
+const queue: Array<{ title: string; body: string; sound: boolean; telegramBody?: string }> = [];
 
 function processQueue(): void {
   if (pending || queue.length === 0) return;
@@ -104,8 +175,8 @@ function processQueue(): void {
     processQueue();
   };
 
-  // Always send to Telegram (async, non-blocking)
-  sendTelegram(item.title, item.body);
+  // Always send to Telegram (async, non-blocking) — use full body if available
+  sendTelegram(item.title, item.telegramBody ?? item.body);
 
   // macOS notification
   if (process.platform === 'darwin') {
@@ -142,6 +213,6 @@ export function sendNotification(event: NotificationEvent): void {
   if (!enabled) return;
   if (isDuplicate(event.dedupeKey)) return;
   const sound = event.type === 'agent_idle' || event.type === 'needs_input';
-  queue.push({ title: event.title, body: event.body, sound });
+  queue.push({ title: event.title, body: event.body, sound, telegramBody: event.telegramBody });
   processQueue();
 }

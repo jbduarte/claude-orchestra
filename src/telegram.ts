@@ -19,6 +19,19 @@ let sessionCache: SessionCache = new Map();
 let lastUpdateId = 0;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
+// Snapshot: freeze session list so /send uses the same order as /sessions
+let sessionSnapshot: ActiveSession[] = [];
+let snapshotAge = 0;
+
+// ---- HTML escaping (safe for all dynamic content) ----
+
+function esc(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 // ---- HTTP helpers ----
 
 function telegramApi(method: string, body?: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -56,13 +69,19 @@ function telegramApi(method: string, body?: Record<string, unknown>): Promise<Re
   });
 }
 
-function sendReply(text: string): void {
+function sendReply(html: string): void {
   if (!config) return;
   telegramApi('sendMessage', {
     chat_id: config.chatId,
-    text,
-    parse_mode: 'Markdown',
-  }).catch(() => {});
+    text: html,
+    parse_mode: 'HTML',
+  }).catch((err) => {
+    // Fallback: send as plain text if HTML fails
+    telegramApi('sendMessage', {
+      chat_id: config!.chatId,
+      text: html.replace(/<[^>]+>/g, ''),
+    }).catch(() => {});
+  });
 }
 
 // ---- Session helpers ----
@@ -79,62 +98,115 @@ function sessionLabel(s: ActiveSession): string {
   return s.project || s.sessionId.slice(0, 7);
 }
 
+function timeAgo(ms: number): string {
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return 'just now';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return `${Math.floor(diff / 86_400_000)}d ago`;
+}
+
+function sessionStatus(s: ActiveSession): { emoji: string; label: string } {
+  const age = Date.now() - s.lastActivityMs;
+  if (age < 60_000) return { emoji: '🟢', label: 'working' };
+  if (age < 180_000) {
+    const last = s.entries[s.entries.length - 1];
+    if (last?.type === 'tool_use') return { emoji: '🟢', label: 'working' };
+  }
+  return { emoji: '🟡', label: 'idle' };
+}
+
+function lastActivity(s: ActiveSession): string {
+  const last = s.entries[s.entries.length - 1];
+  if (!last) return 'no activity';
+
+  if (last.type === 'tool_use') {
+    return `🔧 ${esc(last.text.slice(0, 100))}`;
+  }
+  if (last.type === 'assistant') {
+    const firstLine = last.text.split('\n')[0] ?? '';
+    return esc(firstLine.slice(0, 120));
+  }
+  if (last.type === 'user') {
+    return `👤 ${esc(last.text.slice(0, 100))}`;
+  }
+  return 'no activity';
+}
+
+// ---- Snapshot management ----
+
+function refreshSnapshot(): ActiveSession[] {
+  sessionSnapshot = getSessions();
+  snapshotAge = Date.now();
+  return sessionSnapshot;
+}
+
+function getSnapshot(): ActiveSession[] {
+  if (sessionSnapshot.length > 0 && Date.now() - snapshotAge < 60_000) {
+    return sessionSnapshot;
+  }
+  return refreshSnapshot();
+}
+
 // ---- Command handlers ----
 
 function handleSessions(): void {
-  const sessions = getSessions();
+  const sessions = refreshSnapshot();
   if (sessions.length === 0) {
     sendReply('No active sessions.');
     return;
   }
 
+  const working = sessions.filter(s => sessionStatus(s).label === 'working').length;
+  const idle = sessions.length - working;
+
   const lines = sessions.map((s, i) => {
-    const age = Date.now() - s.lastActivityMs;
-    const status = age < 60000 ? '🟢 working' : '🟡 idle';
+    const status = sessionStatus(s);
     const label = sessionLabel(s);
-    const lastEntry = s.entries[s.entries.length - 1];
-    const lastText = lastEntry ? lastEntry.text.slice(0, 80) : '';
-    return `*${i + 1}.* ${label} — ${status}\n   _${lastText}_`;
+    const model = s.model?.replace('claude-', '').split('-202')[0] ?? '';
+    const activity = lastActivity(s);
+
+    return (
+      `${status.emoji} <b>${i + 1}. ${esc(label)}</b>  <i>${status.label} · ${timeAgo(s.lastActivityMs)}</i>` +
+      (model ? `  [${esc(model)}]` : '') +
+      `\n   ${activity}`
+    );
   });
 
-  sendReply(`*Active Sessions (${sessions.length}):*\n\n${lines.join('\n\n')}`);
+  const header = `<b>Sessions (${sessions.length})</b>  🟢 ${working} working  🟡 ${idle} idle\n`;
+  sendReply(header + '\n' + lines.join('\n\n'));
 }
 
 function handleSend(args: string): void {
   const match = args.match(/^(\d+)\s+(.+)/s);
   if (!match) {
-    sendReply('Usage: `/send <number> <message>`\nExample: `/send 1 fix the bug`');
+    sendReply('Usage: <code>/send 1 fix the bug</code>');
     return;
   }
 
   const idx = parseInt(match[1]!, 10) - 1;
   const message = match[2]!.trim();
 
-  const sessions = getSessions();
+  const sessions = getSnapshot();
   if (idx < 0 || idx >= sessions.length) {
-    sendReply(`Invalid session number. Use /sessions to see available sessions (1-${sessions.length}).`);
+    sendReply(`Invalid session. Run /sessions first.\nAvailable: 1-${sessions.length}`);
     return;
   }
 
   const session = sessions[idx]!;
+  const label = sessionLabel(session);
+
   if (!session.cwd) {
-    sendReply(`Session ${idx + 1} has no CWD — cannot send.`);
+    sendReply(`Session ${idx + 1} (${esc(label)}) has no CWD — cannot send.`);
     return;
   }
 
   const result = sendToSession(session.cwd, message);
   if (result.success) {
-    sendReply(`✅ Sent to *${sessionLabel(session)}*:\n\`${message}\``);
+    sendReply(`✅ Sent to <b>${idx + 1}. ${esc(label)}</b>:\n<code>${esc(message)}</code>`);
   } else {
-    sendReply(`❌ Failed: ${result.error}`);
+    sendReply(`❌ Failed sending to ${esc(label)}: ${esc(result.error ?? 'unknown error')}`);
   }
-}
-
-function handleStatus(): void {
-  const sessions = getSessions();
-  const working = sessions.filter(s => Date.now() - s.lastActivityMs < 60000).length;
-  const idle = sessions.length - working;
-  sendReply(`*Status:* ${sessions.length} sessions\n🟢 ${working} working\n🟡 ${idle} idle`);
 }
 
 function expandHome(p: string): string {
@@ -147,7 +219,6 @@ function expandHome(p: string): string {
 function parseCwdAndPrompt(input: string): { cwd: string; prompt?: string } {
   const trimmed = input.trim();
 
-  // Handle quoted paths
   const quoteMatch = trimmed.match(/^(['"])(.*?)\1\s*(.*)?$/);
   if (quoteMatch) {
     const cwd = expandHome(quoteMatch[2]!);
@@ -155,7 +226,6 @@ function parseCwdAndPrompt(input: string): { cwd: string; prompt?: string } {
     return { cwd, prompt };
   }
 
-  // Unquoted: try progressively longer paths against filesystem
   const words = trimmed.split(/\s+/);
   for (let i = words.length; i >= 1; i--) {
     const raw = words.slice(0, i).join(' ').replace(/^['"]|['"]$/g, '');
@@ -171,7 +241,7 @@ function parseCwdAndPrompt(input: string): { cwd: string; prompt?: string } {
 
 function handleNew(args: string): void {
   if (!args.trim()) {
-    sendReply('Usage: `/new <path> [prompt]`\nExample: `/new ~/my-project fix the login bug`');
+    sendReply('Usage: <code>/new ~/my-project fix the login bug</code>');
     return;
   }
 
@@ -180,31 +250,29 @@ function handleNew(args: string): void {
   const result = startNewSession(cwd, prompt);
   if (result.success) {
     const label = cwd.split('/').pop() ?? cwd;
-    const desc = prompt ? `with prompt: _${prompt}_` : '';
-    sendReply(`🚀 Started new Claude session in \`${label}\` ${desc}`);
+    const desc = prompt ? `\nPrompt: <i>${esc(prompt)}</i>` : '';
+    sendReply(`🚀 Started session in <b>${esc(label)}</b>${desc}`);
   } else {
-    sendReply(`❌ Failed: ${result.error}`);
+    sendReply(`❌ Failed: ${esc(result.error ?? 'unknown error')}`);
   }
 }
 
 function handleHelp(): void {
   sendReply(
-    '*Claude Orchestra Commands:*\n\n' +
-    '`/sessions` — List active sessions\n' +
-    '`/send <n> <msg>` — Send message to session n\n' +
-    '`/new <path> [prompt]` — Start new Claude session\n' +
-    '`/status` — Quick overview\n' +
-    '`/help` — Show this help'
+    '<b>Claude Orchestra</b>\n\n' +
+    '<code>/sessions</code> — List sessions with status and activity\n' +
+    '<code>/send N msg</code> — Send message to session N\n' +
+    '<code>/new path [prompt]</code> — Start new Claude session\n' +
+    '<code>/help</code> — Show this help\n\n' +
+    'Shorthand: <code>1 fix the bug</code> = <code>/send 1 fix the bug</code>'
   );
 }
 
 function handleMessage(text: string): void {
   const trimmed = text.trim();
 
-  if (trimmed === '/sessions' || trimmed === '/s') {
+  if (trimmed === '/sessions' || trimmed === '/s' || trimmed === '/status') {
     handleSessions();
-  } else if (trimmed === '/status') {
-    handleStatus();
   } else if (trimmed === '/help' || trimmed === '/start') {
     handleHelp();
   } else if (trimmed.startsWith('/new ')) {
@@ -213,12 +281,10 @@ function handleMessage(text: string): void {
     const args = trimmed.startsWith('/send ') ? trimmed.slice(6) : trimmed.slice(3);
     handleSend(args);
   } else if (/^\/?\d+\s+/.test(trimmed)) {
-    // Shorthand: "1 fix the bug" or "/1 fix the bug"
     const cleaned = trimmed.replace(/^\//, '');
     handleSend(cleaned);
   } else {
-    // Unknown command — show help hint
-    sendReply('Unknown command. Send `/help` for available commands.');
+    sendReply('Unknown command. Send /help for available commands.');
   }
 }
 
@@ -243,7 +309,6 @@ async function poll(): Promise<void> {
         const msg = update['message'] as Record<string, unknown> | undefined;
         if (!msg) continue;
 
-        // Only handle messages from the configured chat
         const chat = msg['chat'] as Record<string, unknown> | undefined;
         if (chat?.['id'] !== config.chatId) continue;
 
@@ -255,7 +320,6 @@ async function poll(): Promise<void> {
     // Network error — will retry on next poll
   }
 
-  // Schedule next poll
   pollTimer = setTimeout(() => { poll(); }, 1000);
 }
 
@@ -274,12 +338,10 @@ export function startTelegramBot(configDir: string, claudeDirPath: string): void
       };
     }
   } catch {
-    return; // No config — don't start
+    return;
   }
 
   if (!config) return;
-
-  // Start polling
   poll();
 }
 
