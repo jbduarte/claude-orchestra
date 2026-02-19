@@ -16,7 +16,7 @@ export const DEBOUNCE_MS = 500;
 export const AWAIT_WRITE_STABILITY_MS = 300;
 export const AWAIT_WRITE_POLL_MS = 100;
 
-export const AUTO_REFRESH_MS = 30_000;             // 30 seconds — safety net for missed watcher events
+export const AUTO_REFRESH_MS = 10_000;             // 10 seconds — safety net for missed watcher events
 
 // ---- Notifications ----
 

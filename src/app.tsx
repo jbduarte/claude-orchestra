@@ -325,6 +325,9 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
         }
         setInputMode(false);
         setInputText('');
+        // Auto-refresh to show the sent message and Claude's response
+        setTimeout(() => forceRefresh(), 1500);
+        setTimeout(() => forceRefresh(), 4000);
         setTimeout(() => setStatusMsg(''), 5000);
         return;
       }
