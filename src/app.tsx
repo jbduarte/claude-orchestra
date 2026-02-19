@@ -6,8 +6,10 @@ import { useClaudeData } from './hooks.js';
 import { setNotificationsEnabled } from './notify.js';
 import { sendToSession, focusSession, startNewSession, killSession } from './chat.js';
 import { isSessionProcessBusy } from './sessions.js';
+import { platform } from './platform.js';
 import { MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT } from './constants.js';
 import { homedir } from 'node:os';
+import { basename } from 'node:path';
 import { existsSync } from 'node:fs';
 import type { ActiveSession, SessionEntry } from './types.js';
 
@@ -84,12 +86,7 @@ function sessionStatus(session: ActiveSession): { label: string; color: string; 
 function sessionLabel(session: ActiveSession): string {
   if (session.cwd) {
     if (session.cwd === HOME) return '~';
-    if (session.cwd.startsWith(HOME + '/')) {
-      const parts = session.cwd.slice(HOME.length + 1).split('/');
-      return parts[parts.length - 1] || '~';
-    }
-    const parts = session.cwd.split('/');
-    return parts[parts.length - 1] || session.cwd;
+    return basename(session.cwd) || session.cwd;
   }
   if (session.project && session.project !== '~') return session.project;
   return shortId(session.sessionId);
@@ -320,7 +317,7 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
           const { cwd, prompt } = parseCwdAndPrompt(text);
           const result = startNewSession(cwd, prompt);
           if (result.success) {
-            setStatusMsg(`Started session in ${cwd.split('/').pop()}`);
+            setStatusMsg(`Started session in ${basename(cwd)}`);
           } else {
             setStatusMsg(`Failed: ${result.error}`);
           }
@@ -499,7 +496,7 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
           </Text>
         ) : (
           <Text dimColor>
-            Tab:switch Enter:focus ↑↓:scroll i:chat s:new k:kill q:quit n:notif({notificationsOn ? 'ON' : 'OFF'}) r:refresh
+            Tab:switch{platform.supportsFocusSession ? ' Enter:focus' : ''} ↑↓:scroll{platform.supportsSendToSession ? ' i:chat' : ''} s:new k:kill q:quit n:notif({notificationsOn ? 'ON' : 'OFF'}) r:refresh
           </Text>
         )}
       </Box>

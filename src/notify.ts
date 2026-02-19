@@ -1,8 +1,8 @@
-import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { request } from 'node:https';
-import { MAX_NOTIFICATION_LENGTH, NOTIFICATION_DEDUP_MS } from './constants.js';
+import { NOTIFICATION_DEDUP_MS } from './constants.js';
+import { platform } from './platform.js';
 import type { NotificationEvent } from './types.js';
 
 // ---- Telegram config ----
@@ -27,17 +27,6 @@ export function loadTelegramConfig(configDir: string): void {
   } catch {
     // No config file or invalid — Telegram disabled
   }
-}
-
-// ---- Sanitization (CRITICAL: prevents osascript command injection) ----
-
-function sanitizeForAppleScript(str: string): string {
-  return str
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, ' ')
-    .replace(/\r/g, '')
-    .slice(0, MAX_NOTIFICATION_LENGTH);
 }
 
 // ---- Telegram sender ----
@@ -178,23 +167,8 @@ function processQueue(): void {
   // Always send to Telegram (async, non-blocking) — use full body if available
   sendTelegram(item.title, item.telegramBody ?? item.body);
 
-  // macOS notification
-  if (process.platform === 'darwin') {
-    const safeTitle = sanitizeForAppleScript(item.title);
-    const safeBody = sanitizeForAppleScript(item.body);
-    const sound = item.sound ? ' sound name "Glass"' : '';
-    const script = `display notification "${safeBody}" with title "${safeTitle}"${sound}`;
-    execFile('osascript', ['-e', script], { timeout: 5000 }, done);
-  } else if (process.platform === 'linux') {
-    execFile(
-      'notify-send',
-      [item.title.slice(0, MAX_NOTIFICATION_LENGTH), item.body.slice(0, MAX_NOTIFICATION_LENGTH)],
-      { timeout: 5000 },
-      done,
-    );
-  } else {
-    done();
-  }
+  // Platform-specific desktop notification
+  platform.sendNotification(item.title, item.body, item.sound, done);
 }
 
 // ---- Public API ----

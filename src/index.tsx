@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { existsSync } from 'node:fs';
-import { execSync } from 'node:child_process';
 import { withFullScreen } from 'fullscreen-ink';
 import App from './app.js';
 import { DEFAULT_CLAUDE_DIR } from './constants.js';
+import { platform } from './platform.js';
 import { loadTelegramConfig } from './notify.js';
 import { startTelegramBot, stopTelegramBot } from './telegram.js';
 
@@ -45,22 +45,8 @@ if (!process.stdin.isTTY) {
   process.exit(1);
 }
 
-// Maximize terminal window (macOS only — not fullscreen, just fill the screen)
-if (process.platform === 'darwin') {
-  try {
-    execSync(`osascript -e '
-      tell application "System Events"
-        set frontApp to name of first application process whose frontmost is true
-      end tell
-      tell application frontApp
-        if (count of windows) > 0 then
-          tell application "Finder" to set {_, _, screenW, screenH} to bounds of window of desktop
-          set bounds of front window to {0, 25, screenW, screenH}
-        end if
-      end tell
-    '`, { timeout: 3000, stdio: 'ignore' });
-  } catch { /* ignore — non-critical */ }
-}
+// Maximize terminal window (platform-specific)
+platform.maximizeWindow();
 
 // Load Telegram config from project root (config.json)
 const configDir = new URL('..', import.meta.url).pathname;

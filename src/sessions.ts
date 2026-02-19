@@ -2,6 +2,7 @@ import { openSync, readSync, closeSync, statSync, fstatSync, readdirSync, exists
 import { execSync } from 'node:child_process';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
+import { platform } from './platform.js';
 import type { ActiveSession, SessionEntry } from './types.js';
 
 // ---- Constants ----
@@ -125,8 +126,8 @@ export function readLastAssistantText(jsonlPath: string): string | null {
 // ---- Project name decoding ----
 
 const HOME = homedir();
-// Claude Code encodes paths: / → - and . → -
-const HOME_ENCODED = '-' + HOME.split('/').filter(Boolean).join('-').replace(/\./g, '-');
+// Claude Code encodes paths: separators → - and . → -
+const HOME_ENCODED = platform.encodeHomePath(HOME);
 
 function decodeProjectName(encoded: string): string {
   if (encoded === HOME_ENCODED) return '~';

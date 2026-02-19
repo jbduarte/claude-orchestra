@@ -1,6 +1,6 @@
 import { request as httpsRequest } from 'node:https';
 import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { sendToSession, startNewSession, killSession } from './chat.js';
 import { findActiveSessions } from './sessions.js';
 import type { SessionCache } from './sessions.js';
@@ -92,8 +92,7 @@ function getSessions(): ActiveSession[] {
 
 function sessionLabel(s: ActiveSession): string {
   if (s.cwd) {
-    const parts = s.cwd.split('/');
-    return parts[parts.length - 1] || s.cwd;
+    return basename(s.cwd) || s.cwd;
   }
   return s.project || s.sessionId.slice(0, 7);
 }
@@ -251,7 +250,7 @@ function handleNew(args: string): void {
 
   const result = startNewSession(cwd, prompt);
   if (result.success) {
-    const label = cwd.split('/').pop() ?? cwd;
+    const label = basename(cwd) || cwd;
     const desc = prompt ? `\nPrompt: <i>${esc(prompt)}</i>` : '';
     sendReply(`🚀 Started session in <b>${esc(label)}</b>${desc}`);
   } else {

@@ -1,4 +1,5 @@
 import { useReducer, useEffect, useRef, useCallback } from 'react';
+import { basename } from 'node:path';
 import chokidar from 'chokidar';
 import type { DataState, DataAction, NotificationEvent, Message, ActiveSession } from './types.js';
 import { readAllData, enrichTeamStatuses } from './parsers.js';
@@ -167,7 +168,7 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
         if (!nowWorking.has(id)) {
           const s = newData.sessions.find(sess => sess.sessionId === id);
           if (s) {
-            const label = s.cwd?.split('/').pop() ?? s.project;
+            const label = (s.cwd ? basename(s.cwd) : undefined) ?? s.project;
             events.push({
               type: 'agent_idle',
               title: 'Awaiting the Maestro',
@@ -182,7 +183,7 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
       for (const s of newData.sessions) {
         if (!isFirstRefresh.current && !nowWorking.has(s.sessionId) && !knownSessionsRef.current.has(s.sessionId)) {
           // First time seeing this idle session — only notify once
-          const label = s.cwd?.split('/').pop() ?? s.project;
+          const label = (s.cwd ? basename(s.cwd) : undefined) ?? s.project;
           events.push({
             type: 'agent_idle',
             title: 'Awaiting the Maestro',
