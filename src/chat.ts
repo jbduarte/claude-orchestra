@@ -178,7 +178,7 @@ function projectNameFromCwd(cwd: string): string {
 function sendViaTerminal(ttyDevice: string, message: string): boolean {
   const escaped = escapeForAppleScript(message);
 
-  // Save orchestra's tab, switch to target, send keystrokes + Enter, switch back
+  // Save orchestra's tab, switch to target, paste via clipboard + Enter, switch back
   const script = `
     tell application "Terminal"
       set orchestraWindow to front window
@@ -202,14 +202,17 @@ function sendViaTerminal(ttyDevice: string, message: string): boolean {
     end tell
     tell application "Terminal" to activate
     delay 0.1
+    set oldClip to the clipboard
+    set the clipboard to "${escaped}"
     tell application "System Events"
       tell process "Terminal"
-        keystroke "${escaped}"
+        keystroke "v" using command down
         delay 0.05
         key code 36
       end tell
     end tell
     delay 0.1
+    set the clipboard to oldClip
     tell application "Terminal"
       set selected of orchestraTab to true
       set frontmost of orchestraWindow to true
@@ -235,11 +238,13 @@ function sendViaAppWindow(app: AppInfo, projectName: string, message: string): b
   const escapedDisplayName = escapeForAppleScript(app.displayName);
   const escapedProcessName = escapeForAppleScript(app.processName);
 
-  // Save current app, send keystrokes to target, then refocus back to orchestra
+  // Save current app, paste via clipboard to target, then refocus back to orchestra
   const script = `
     tell application "System Events"
       set orchestraApp to name of first application process whose frontmost is true
     end tell
+    set oldClip to the clipboard
+    set the clipboard to "${escaped}"
     tell application "${escapedDisplayName}" to activate
     delay 0.1
     tell application "System Events"
@@ -253,16 +258,18 @@ function sendViaAppWindow(app: AppInfo, projectName: string, message: string): b
           end if
         end repeat
         if targetWindow is missing value then
+          set the clipboard to oldClip
           error "No window found for ${escapedProject}"
         end if
         perform action "AXRaise" of targetWindow
         delay 0.1
-        keystroke "${escaped}"
+        keystroke "v" using command down
         delay 0.05
         key code 36
       end tell
     end tell
     delay 0.1
+    set the clipboard to oldClip
     tell application orchestraApp to activate
   `;
 

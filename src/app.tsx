@@ -291,6 +291,7 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
   const [inputMode, setInputMode] = useState<false | 'chat' | 'new'>(false);
   const [inputText, setInputText] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
+  const [chatTarget, setChatTarget] = useState<{ cwd: string; label: string } | null>(null);
 
   const safeIdx = sessions.length > 0 ? Math.min(selectedIdx, sessions.length - 1) : 0;
   const selectedSession = sessions[safeIdx] ?? null;
@@ -303,14 +304,15 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
       if (key.escape) {
         setInputMode(false);
         setInputText('');
+        setChatTarget(null);
         return;
       }
       if (key.return) {
         const text = inputText.trim();
-        if (inputMode === 'chat' && text && selectedSession?.cwd) {
-          const result = sendToSession(selectedSession.cwd, text);
+        if (inputMode === 'chat' && text && chatTarget) {
+          const result = sendToSession(chatTarget.cwd, text);
           if (result.success) {
-            setStatusMsg(`Sent to ${sessionLabel(selectedSession)}`);
+            setStatusMsg(`Sent to ${chatTarget.label}`);
           } else {
             setStatusMsg(`Failed: ${result.error}`);
           }
@@ -325,6 +327,7 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
         }
         setInputMode(false);
         setInputText('');
+        setChatTarget(null);
         // Auto-refresh to show the sent message and Claude's response
         setTimeout(() => forceRefresh(), 1500);
         setTimeout(() => forceRefresh(), 4000);
@@ -348,8 +351,11 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
       return;
     }
     if (input === 'i') {
-      setInputMode('chat');
-      setInputText('');
+      if (selectedSession?.cwd) {
+        setChatTarget({ cwd: selectedSession.cwd, label: sessionLabel(selectedSession) });
+        setInputMode('chat');
+        setInputText('');
+      }
       return;
     }
     if (input === 's') {
@@ -472,7 +478,7 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
       <Box paddingX={1}>
         {inputMode ? (
           <Text>
-            <Text color="green" bold>{inputMode === 'new' ? 'new> ' : '> '}</Text>
+            <Text color="green" bold>{inputMode === 'new' ? 'new> ' : `${chatTarget?.label ?? ''}> `}</Text>
             <Text>{inputText}</Text>
             <Text dimColor>█</Text>
             <Text dimColor>  {inputMode === 'new' ? '(path [prompt] Enter:start Esc:cancel)' : '(Enter:send Esc:cancel)'}</Text>
