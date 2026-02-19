@@ -12,11 +12,11 @@ export const STALE_THRESHOLD_MS = 10 * 60 * 1000;    // 10 minutes
 
 // ---- File watching ----
 
-export const DEBOUNCE_MS = 500;
-export const AWAIT_WRITE_STABILITY_MS = 300;
-export const AWAIT_WRITE_POLL_MS = 100;
+export const DEBOUNCE_MS = 200;
+export const AWAIT_WRITE_STABILITY_MS = 150;
+export const AWAIT_WRITE_POLL_MS = 50;
 
-export const AUTO_REFRESH_MS = 10_000;             // 10 seconds — safety net for missed watcher events
+export const AUTO_REFRESH_MS = 5_000;              // 5 seconds — safety net for missed watcher events
 
 // ---- Notifications ----
 
