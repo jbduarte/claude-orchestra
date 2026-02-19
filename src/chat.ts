@@ -173,32 +173,55 @@ function projectNameFromCwd(cwd: string): string {
   return parts[parts.length - 1] || cwd;
 }
 
-// ---- Send to Terminal.app tab without stealing focus (uses "do script") ----
+// ---- Send to Terminal.app tab, then refocus orchestra's tab ----
 
 function sendViaTerminal(ttyDevice: string, message: string): boolean {
   const escaped = escapeForAppleScript(message);
 
-  // "do script" sends text directly to a tab's foreground process — no focus change needed
+  // Save orchestra's tab, switch to target, send keystrokes + Enter, switch back
   const script = `
     tell application "Terminal"
+      set orchestraWindow to front window
+      set orchestraTab to selected tab of orchestraWindow
+
+      set targetTab to missing value
+      set targetWindow to missing value
       repeat with w in windows
         repeat with t in tabs of w
           if tty of t is "${ttyDevice}" then
-            do script "${escaped}" in t
-            return true
+            set targetTab to t
+            set targetWindow to w
           end if
         end repeat
       end repeat
-      return false
+      if targetTab is missing value then
+        error "No Terminal tab found for ${ttyDevice}"
+      end if
+      set selected of targetTab to true
+      set frontmost of targetWindow to true
+    end tell
+    tell application "Terminal" to activate
+    delay 0.3
+    tell application "System Events"
+      tell process "Terminal"
+        keystroke "${escaped}"
+        delay 0.2
+        key code 36
+      end tell
+    end tell
+    delay 0.2
+    tell application "Terminal"
+      set selected of orchestraTab to true
+      set frontmost of orchestraWindow to true
     end tell
   `;
 
   try {
-    const result = execSync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, {
+    execSync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, {
       encoding: 'utf-8',
-      timeout: 10000,
-    }).trim();
-    return result === 'true';
+      timeout: 15000,
+    });
+    return true;
   } catch {
     return false;
   }
