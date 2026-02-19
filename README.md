@@ -17,11 +17,13 @@ Watches `~/.claude/` for active sessions, teams, tasks, and agent messages — r
 
 ## Install
 
+**Prerequisite:** [Node.js](https://nodejs.org/) >= 20 (includes npm). Install via [nodejs.org](https://nodejs.org/) or Homebrew: `brew install node`
+
 ```sh
 npm install -g @jbduarte/claude-orchestra
 ```
 
-Or run directly:
+Or run directly without installing:
 
 ```sh
 npx @jbduarte/claude-orchestra
@@ -38,11 +40,17 @@ claude-orchestra /path/dir  # monitors a custom directory
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `Shift+Tab` | Cycle panels |
-| `1` / `2` / `3` | Jump to Teams / Tasks / Messages |
-| `q` | Quit |
+| `Tab` / `Shift+Tab` | Switch between sessions |
+| `1`–`9` | Jump to session by number |
+| `Enter` | Focus the selected session's terminal window |
+| `i` | Send a message to the selected session |
+| `s` | Start a new Claude session |
+| `k` | Kill the selected session |
+| `↑` / `↓` | Scroll conversation |
+| `g` / `G` | Scroll to top / bottom |
 | `n` | Toggle notifications |
 | `r` | Force refresh |
+| `q` | Quit |
 
 ## Dashboard Panels
 
@@ -80,11 +88,12 @@ Monitor your sessions remotely and send messages from your phone.
 | Command | Description |
 |---------|-------------|
 | `/sessions` | List all active sessions with status |
-| `/send N message` | Send a message to session N (from session list) |
+| `/send N message` | Send a message to session N |
+| `/kill N` | Kill session N |
 | `/new /path/to/project [prompt]` | Start a new Claude session in Terminal.app |
 | `/help` | Show available commands |
 
-Shortcuts: `/s` for `/sessions`, `/s N message` for `/send`.
+Shortcuts: `/s` for `/sessions`, `N message` for `/send N message`.
 
 The bot also forwards notifications: session completions, idle alerts, and action items.
 
@@ -111,7 +120,8 @@ Session **send** (keystroke injection) supports:
 - Uses `ps` + `lsof` to detect running Claude processes and their working directories
 - Filters closed sessions: 5-minute idle threshold before process check, 5-minute grace period after close
 - Auto-kills orphaned child processes from closed sessions
-- Watches filesystem with chokidar (500ms debounce) + periodic refresh as safety net
+- Uses CPU usage detection to avoid false idle notifications during context compaction
+- Watches filesystem with chokidar (200ms debounce) + 5s periodic refresh as safety net
 - Per-file mtime caching — only re-parses files that changed
 - Resolves System Events process names at runtime for correct IDE window targeting
 
