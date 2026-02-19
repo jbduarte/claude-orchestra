@@ -31,9 +31,18 @@ npx @jbduarte/claude-orchestra
 
 ## Usage
 
+Open a terminal and run:
+
 ```sh
-claude-orchestra            # monitors ~/.claude/
-claude-orchestra /path/dir  # monitors a custom directory
+claude-orchestra
+```
+
+That's it. The dashboard launches fullscreen and auto-detects all running Claude Code sessions.
+
+To monitor a custom directory instead of `~/.claude/`:
+
+```sh
+claude-orchestra /path/to/dir
 ```
 
 ## Keyboard Shortcuts
