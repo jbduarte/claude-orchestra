@@ -364,5 +364,6 @@ export function findActiveSessions(claudeDir: string, cache: SessionCache): Acti
     return idleMs < IDLE_CHECK_MS + CLOSED_GRACE_MS;
   });
 
-  return alive.sort((a, b) => a.startedMs - b.startedMs);
+  // Sort by start time (stable). Tiebreaker: sessionId for deterministic order.
+  return alive.sort((a, b) => a.startedMs - b.startedMs || a.sessionId.localeCompare(b.sessionId));
 }

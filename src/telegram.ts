@@ -278,9 +278,7 @@ function handleKill(args: string): void {
 
   const result = killSession(session.cwd);
   if (result.success) {
-    sendReply(`🔴 Killed <b>${idx + 1}. ${esc(label)}</b>`);
-    // Refresh snapshot since a session was removed
-    setTimeout(() => refreshSnapshot(), 2000);
+    sendReply(`🔴 Killed <b>${idx + 1}. ${esc(label)}</b>\nRun /sessions to refresh the list.`);
   } else {
     sendReply(`❌ Failed to kill ${esc(label)}: ${esc(result.error ?? 'unknown error')}`);
   }
