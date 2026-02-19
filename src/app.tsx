@@ -228,7 +228,7 @@ function ConversationView({
           <Text dimColor> — {session.cwd.startsWith(HOME) ? '~' + session.cwd.slice(HOME.length) : session.cwd}</Text>
         ) : null}
       </Box>
-      <Box flexDirection="column" flexGrow={1} overflow="hidden">
+      <Box flexDirection="column" flexGrow={1} overflow="hidden" justifyContent="flex-end">
         {visible.map((entry, i) => (
           <EntryLine key={`${entry.timestamp}-${i}`} entry={entry} />
         ))}
@@ -254,16 +254,19 @@ function EntryLine({ entry }: { entry: SessionEntry }): ReactNode {
           </Text>
         </Box>
       );
-    case 'assistant':
+    case 'assistant': {
+      const text = entry.text.trim();
+      if (!text) return null;
       return (
         <Box flexDirection="column">
           <Text>
             {time}
             <Text color="blue" bold>Claude </Text>
           </Text>
-          <Text wrap="wrap">{entry.text}</Text>
+          <Text wrap="wrap">{text}</Text>
         </Box>
       );
+    }
     case 'tool_use':
       return (
         <Text wrap="truncate-end" dimColor>

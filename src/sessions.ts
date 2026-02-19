@@ -60,8 +60,8 @@ function parseLine(line: string): { entries: SessionEntry[]; cwd?: string; model
       const model = typeof raw.message.model === 'string' ? raw.message.model : undefined;
 
       for (const block of raw.message.content) {
-        if (block.type === 'text' && typeof block.text === 'string' && block.text.length > 0) {
-          entries.push({ type: 'assistant', timestamp: ts, text: block.text.slice(0, 2000) });
+        if (block.type === 'text' && typeof block.text === 'string' && block.text.trim().length > 0) {
+          entries.push({ type: 'assistant', timestamp: ts, text: block.text.trim().slice(0, 2000) });
         }
         if (block.type === 'tool_use' && typeof block.name === 'string') {
           let desc = block.name;
