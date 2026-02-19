@@ -1,7 +1,7 @@
 import { request as httpsRequest } from 'node:https';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { sendToSession, startNewSession } from './chat.js';
+import { sendToSession, startNewSession, killSession } from './chat.js';
 import { findActiveSessions } from './sessions.js';
 import type { SessionCache } from './sessions.js';
 import type { ActiveSession } from './types.js';
@@ -259,11 +259,39 @@ function handleNew(args: string): void {
   }
 }
 
+function handleKill(args: string): void {
+  const idx = parseInt(args.trim(), 10) - 1;
+  const sessions = getSnapshot();
+
+  if (isNaN(idx) || idx < 0 || idx >= sessions.length) {
+    sendReply(`Usage: <code>/kill 2</code>\nRun /sessions to see available sessions.`);
+    return;
+  }
+
+  const session = sessions[idx]!;
+  const label = sessionLabel(session);
+
+  if (!session.cwd) {
+    sendReply(`Session ${idx + 1} (${esc(label)}) has no CWD — cannot kill.`);
+    return;
+  }
+
+  const result = killSession(session.cwd);
+  if (result.success) {
+    sendReply(`🔴 Killed <b>${idx + 1}. ${esc(label)}</b>`);
+    // Refresh snapshot since a session was removed
+    setTimeout(() => refreshSnapshot(), 2000);
+  } else {
+    sendReply(`❌ Failed to kill ${esc(label)}: ${esc(result.error ?? 'unknown error')}`);
+  }
+}
+
 function handleHelp(): void {
   sendReply(
     '<b>Claude Orchestra</b>\n\n' +
     '<code>/sessions</code> — List sessions with status and activity\n' +
     '<code>/send N msg</code> — Send message to session N\n' +
+    '<code>/kill N</code> — Kill session N\n' +
     '<code>/new path [prompt]</code> — Start new Claude session\n' +
     '<code>/help</code> — Show this help\n\n' +
     'Shorthand: <code>1 fix the bug</code> = <code>/send 1 fix the bug</code>'
@@ -277,6 +305,8 @@ function handleMessage(text: string): void {
     handleSessions();
   } else if (trimmed === '/help' || trimmed === '/start') {
     handleHelp();
+  } else if (trimmed.startsWith('/kill ')) {
+    handleKill(trimmed.slice(6));
   } else if (trimmed.startsWith('/new ')) {
     handleNew(trimmed.slice(5));
   } else if (trimmed.startsWith('/send ') || trimmed.startsWith('/s ')) {

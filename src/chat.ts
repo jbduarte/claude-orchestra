@@ -408,6 +408,22 @@ export function sendToSession(sessionCwd: string, message: string): { success: b
   return { success: false, error: `Session window not found — it may have closed, Maestro` };
 }
 
+// ---- Public: kill a session's Claude process ----
+
+export function killSession(sessionCwd: string): { success: boolean; error?: string } {
+  const proc = findProcessForSession(sessionCwd);
+  if (!proc) {
+    return { success: false, error: 'No running process found' };
+  }
+
+  try {
+    process.kill(proc.pid, 'SIGTERM');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: `Failed to kill process: ${(err as Error).message}` };
+  }
+}
+
 // ---- Public: start a new Claude session in a new Terminal tab ----
 
 export function startNewSession(cwd: string, prompt?: string): { success: boolean; error?: string } {

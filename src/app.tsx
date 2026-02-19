@@ -4,7 +4,7 @@ import { Spinner } from '@inkjs/ui';
 import { FullScreenBox, useScreenSize } from 'fullscreen-ink';
 import { useClaudeData } from './hooks.js';
 import { setNotificationsEnabled } from './notify.js';
-import { sendToSession, focusSession, startNewSession } from './chat.js';
+import { sendToSession, focusSession, startNewSession, killSession } from './chat.js';
 import { isSessionProcessBusy } from './sessions.js';
 import { MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT } from './constants.js';
 import { homedir } from 'node:os';
@@ -363,6 +363,20 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
       setInputText('');
       return;
     }
+    if (input === 'k') {
+      if (selectedSession?.cwd) {
+        const label = sessionLabel(selectedSession);
+        const result = killSession(selectedSession.cwd);
+        if (result.success) {
+          setStatusMsg(`Killed ${label}`);
+        } else {
+          setStatusMsg(`Kill failed: ${result.error}`);
+        }
+        setTimeout(() => forceRefresh(), 1000);
+        setTimeout(() => setStatusMsg(''), 3000);
+      }
+      return;
+    }
     if (input === 'n') {
       setNotificationsOn((prev) => {
         const next = !prev;
@@ -485,7 +499,7 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
           </Text>
         ) : (
           <Text dimColor>
-            Tab:switch Enter:focus ↑↓:scroll i:chat s:new q:quit n:notif({notificationsOn ? 'ON' : 'OFF'}) r:refresh
+            Tab:switch Enter:focus ↑↓:scroll i:chat s:new k:kill q:quit n:notif({notificationsOn ? 'ON' : 'OFF'}) r:refresh
           </Text>
         )}
       </Box>
