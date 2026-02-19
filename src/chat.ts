@@ -173,52 +173,38 @@ function projectNameFromCwd(cwd: string): string {
   return parts[parts.length - 1] || cwd;
 }
 
-// ---- Focus + send for Terminal.app (uses TTY to find exact tab) ----
+// ---- Send to Terminal.app tab without stealing focus (uses "do script") ----
 
 function sendViaTerminal(ttyDevice: string, message: string): boolean {
   const escaped = escapeForAppleScript(message);
 
+  // "do script" sends text directly to a tab's foreground process — no focus change needed
   const script = `
     tell application "Terminal"
-      set targetTab to missing value
-      set targetWindow to missing value
       repeat with w in windows
         repeat with t in tabs of w
           if tty of t is "${ttyDevice}" then
-            set targetTab to t
-            set targetWindow to w
+            do script "${escaped}" in t
+            return true
           end if
         end repeat
       end repeat
-      if targetTab is missing value then
-        error "No Terminal tab found for ${ttyDevice}"
-      end if
-      set selected of targetTab to true
-      set frontmost of targetWindow to true
-    end tell
-    tell application "Terminal" to activate
-    delay 0.5
-    tell application "System Events"
-      tell process "Terminal"
-        keystroke "${escaped}"
-        delay 0.3
-        key code 36
-      end tell
+      return false
     end tell
   `;
 
   try {
-    execSync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, {
+    const result = execSync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, {
       encoding: 'utf-8',
       timeout: 10000,
-    });
-    return true;
+    }).trim();
+    return result === 'true';
   } catch {
     return false;
   }
 }
 
-// ---- Focus + send for apps with window title matching (IDEs, etc.) ----
+// ---- Focus + send for apps with window title matching, then refocus back ----
 
 function sendViaAppWindow(app: AppInfo, projectName: string, message: string): boolean {
   const escaped = escapeForAppleScript(message);
@@ -226,9 +212,11 @@ function sendViaAppWindow(app: AppInfo, projectName: string, message: string): b
   const escapedDisplayName = escapeForAppleScript(app.displayName);
   const escapedProcessName = escapeForAppleScript(app.processName);
 
-  // Find the window whose title contains the project name, raise it, then type
-  // ONLY sends keystrokes if the matching window is found — never to a random window
+  // Save current app, send keystrokes to target, then refocus back to orchestra
   const script = `
+    tell application "System Events"
+      set orchestraApp to name of first application process whose frontmost is true
+    end tell
     tell application "${escapedDisplayName}" to activate
     delay 0.3
     tell application "System Events"
@@ -251,12 +239,14 @@ function sendViaAppWindow(app: AppInfo, projectName: string, message: string): b
         key code 36
       end tell
     end tell
+    delay 0.2
+    tell application orchestraApp to activate
   `;
 
   try {
     execSync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, {
       encoding: 'utf-8',
-      timeout: 10000,
+      timeout: 15000,
     });
     return true;
   } catch {
@@ -396,15 +386,22 @@ export function startNewSession(cwd: string, prompt?: string): { success: boolea
     ? `cd ${shellEscape(cwd)} && claude --dangerously-skip-permissions ${shellEscape(prompt)}`
     : `cd ${shellEscape(cwd)} && claude --dangerously-skip-permissions`;
 
-  const script = `tell application "Terminal"
-    activate
-    do script "${escapeForAppleScript(shellCmd)}"
-  end tell`;
+  // Start session in a new Terminal tab, then refocus orchestra
+  const script = `
+    tell application "System Events"
+      set orchestraApp to name of first application process whose frontmost is true
+    end tell
+    tell application "Terminal"
+      do script "${escapeForAppleScript(shellCmd)}"
+    end tell
+    delay 0.5
+    tell application orchestraApp to activate
+  `;
 
   try {
     execSync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, {
       encoding: 'utf-8',
-      timeout: 5000,
+      timeout: 10000,
     });
     return { success: true };
   } catch (err) {
