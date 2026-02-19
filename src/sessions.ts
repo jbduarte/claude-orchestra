@@ -12,7 +12,7 @@ const MAX_ENTRIES_PER_SESSION = 60;
 
 // ---- Cache ----
 
-export type SessionCache = Map<string, { size: number; mtime: number; entries: SessionEntry[]; cwd?: string; model?: string }>;
+export type SessionCache = Map<string, { size: number; mtime: number; birthtime: number; entries: SessionEntry[]; cwd?: string; model?: string }>;
 
 // ---- Efficient tail reading ----
 
@@ -295,6 +295,7 @@ export function findActiveSessions(claudeDir: string, cache: SessionCache): Acti
             project: decodeProjectName(projectEntry),
             jsonlPath: filePath,
             lastActivityMs: stat.mtimeMs,
+            startedMs: cached.birthtime,
             cwd: cached.cwd,
             model: cached.model,
             entries: cached.entries,
@@ -325,13 +326,14 @@ export function findActiveSessions(claudeDir: string, cache: SessionCache): Acti
 
         const entries = allEntries.slice(-MAX_ENTRIES_PER_SESSION);
 
-        cache.set(filePath, { size: stat.size, mtime: stat.mtimeMs, entries, cwd: lastCwd, model: lastModel });
+        cache.set(filePath, { size: stat.size, mtime: stat.mtimeMs, birthtime: stat.birthtimeMs, entries, cwd: lastCwd, model: lastModel });
 
         sessions.push({
           sessionId: basename(file, '.jsonl'),
           project: decodeProjectName(projectEntry),
           jsonlPath: filePath,
           lastActivityMs: stat.mtimeMs,
+          startedMs: stat.birthtimeMs,
           cwd: lastCwd,
           model: lastModel,
           entries,
@@ -362,5 +364,5 @@ export function findActiveSessions(claudeDir: string, cache: SessionCache): Acti
     return idleMs < IDLE_CHECK_MS + CLOSED_GRACE_MS;
   });
 
-  return alive.sort((a, b) => b.lastActivityMs - a.lastActivityMs);
+  return alive.sort((a, b) => a.startedMs - b.startedMs);
 }

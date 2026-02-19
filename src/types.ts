@@ -12,6 +12,7 @@ export interface ActiveSession {
   project: string;
   jsonlPath: string;
   lastActivityMs: number;
+  startedMs: number;
   cwd?: string;
   model?: string;
   entries: SessionEntry[];
