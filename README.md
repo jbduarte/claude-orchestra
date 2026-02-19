@@ -128,9 +128,10 @@ npm run build    # compile to dist/
 
 ## Requirements
 
-- Node.js >= 20
-- macOS (notifications and keystroke injection use AppleScript/System Events)
-- Linux support: session detection and dashboard work; notifications use notify-send; keystroke injection not available
+- **Node.js >= 20** — Install from [nodejs.org](https://nodejs.org/) or via Homebrew: `brew install node`
+- **npm** — Included with Node.js (no separate install needed)
+- **macOS** — Notifications and keystroke injection use AppleScript/System Events
+- **Linux** — Session detection and dashboard work; notifications use notify-send; keystroke injection not available
 
 ## License
 
