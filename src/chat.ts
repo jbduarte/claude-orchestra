@@ -201,15 +201,15 @@ function sendViaTerminal(ttyDevice: string, message: string): boolean {
       set frontmost of targetWindow to true
     end tell
     tell application "Terminal" to activate
-    delay 0.3
+    delay 0.1
     tell application "System Events"
       tell process "Terminal"
         keystroke "${escaped}"
-        delay 0.2
+        delay 0.05
         key code 36
       end tell
     end tell
-    delay 0.2
+    delay 0.1
     tell application "Terminal"
       set selected of orchestraTab to true
       set frontmost of orchestraWindow to true
@@ -241,7 +241,7 @@ function sendViaAppWindow(app: AppInfo, projectName: string, message: string): b
       set orchestraApp to name of first application process whose frontmost is true
     end tell
     tell application "${escapedDisplayName}" to activate
-    delay 0.3
+    delay 0.1
     tell application "System Events"
       tell process "${escapedProcessName}"
         set targetWindow to missing value
@@ -256,13 +256,13 @@ function sendViaAppWindow(app: AppInfo, projectName: string, message: string): b
           error "No window found for ${escapedProject}"
         end if
         perform action "AXRaise" of targetWindow
-        delay 0.3
+        delay 0.1
         keystroke "${escaped}"
-        delay 0.3
+        delay 0.05
         key code 36
       end tell
     end tell
-    delay 0.2
+    delay 0.1
     tell application orchestraApp to activate
   `;
 
