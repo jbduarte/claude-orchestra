@@ -207,8 +207,8 @@ function sendViaTerminal(ttyDevice: string, message: string): boolean {
     tell application "System Events"
       tell process "Terminal"
         keystroke "v" using command down
-        delay 0.05
-        key code 36
+        delay 0.3
+        keystroke return
       end tell
     end tell
     delay 0.1
@@ -264,8 +264,8 @@ function sendViaAppWindow(app: AppInfo, projectName: string, message: string): b
         perform action "AXRaise" of targetWindow
         delay 0.1
         keystroke "v" using command down
-        delay 0.05
-        key code 36
+        delay 0.3
+        keystroke return
       end tell
     end tell
     delay 0.1
