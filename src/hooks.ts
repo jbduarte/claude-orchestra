@@ -3,7 +3,7 @@ import chokidar from 'chokidar';
 import type { DataState, DataAction, NotificationEvent, Message, ActiveSession } from './types.js';
 import { readAllData, enrichTeamStatuses } from './parsers.js';
 import type { FileCache } from './parsers.js';
-import { findActiveSessions, readLastAssistantText } from './sessions.js';
+import { findActiveSessions, readLastAssistantText, isSessionProcessBusy } from './sessions.js';
 import type { SessionCache } from './sessions.js';
 import { DEBOUNCE_MS, AWAIT_WRITE_STABILITY_MS, AWAIT_WRITE_POLL_MS, AUTO_REFRESH_MS } from './constants.js';
 import { sendNotification } from './notify.js';
@@ -146,6 +146,7 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
 
       // Detect working → idle transitions using persistent ref
       // Uses same logic as UI: <60s=working, >180s=idle, 60-180s=check last entry type
+      // Also checks CPU usage — if the process is busy (compaction, API call), it's still working
       const nowWorking = new Set<string>();
       for (const s of newData.sessions) {
         const age = Date.now() - s.lastActivityMs;
@@ -154,6 +155,11 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
         } else if (age <= 180_000) {
           const last = s.entries[s.entries.length - 1];
           if (last?.type === 'tool_use') nowWorking.add(s.sessionId);
+          // CPU check: if process is busy, it's working (e.g. compaction, long API call)
+          else if (s.cwd && isSessionProcessBusy(s.cwd)) nowWorking.add(s.sessionId);
+        } else {
+          // >180s idle — still check CPU in case of long compaction
+          if (s.cwd && isSessionProcessBusy(s.cwd)) nowWorking.add(s.sessionId);
         }
       }
       // Sessions that WERE working but are NOW idle (working→idle transition)

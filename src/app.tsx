@@ -5,6 +5,7 @@ import { FullScreenBox, useScreenSize } from 'fullscreen-ink';
 import { useClaudeData } from './hooks.js';
 import { setNotificationsEnabled } from './notify.js';
 import { sendToSession, focusSession, startNewSession } from './chat.js';
+import { isSessionProcessBusy } from './sessions.js';
 import { MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT } from './constants.js';
 import { homedir } from 'node:os';
 import { existsSync } from 'node:fs';
@@ -67,6 +68,8 @@ function shortId(id: string): string {
 function isSessionIdle(session: ActiveSession): boolean {
   const age = Date.now() - session.lastActivityMs;
   if (age < 60_000) return false; // active within 60s — definitely working
+  // CPU check: if process is busy (compaction, API call), it's still working
+  if (session.cwd && isSessionProcessBusy(session.cwd)) return false;
   if (age > 180_000) return true; // 3 min silence — idle regardless
   // Between 1-3 min: check last entry — if assistant text, likely waiting for input
   const last = session.entries[session.entries.length - 1];

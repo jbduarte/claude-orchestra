@@ -143,44 +143,67 @@ function decodeProjectName(encoded: string): string {
 
 const IDLE_CHECK_MS = 5 * 60 * 1000;   // Start checking after 5min idle
 const CLOSED_GRACE_MS = 5 * 60 * 1000; // Keep closed sessions visible for 5min
-let cachedCwds: Set<string> | null = null;
-let cachedCwdsAt = 0;
+
+interface ClaudeProcess {
+  pid: number;
+  cwd: string;
+  cpu: number;  // %CPU — >0 means actively processing (compaction, API call, etc.)
+}
+
+let cachedProcesses: ClaudeProcess[] | null = null;
+let cachedProcessesAt = 0;
 const PROCESS_CACHE_MS = 15_000;        // Cache for 15s
 
-function getRunningClaudeCwds(): Set<string> {
+function getRunningClaudeProcesses(): ClaudeProcess[] {
   const now = Date.now();
-  if (cachedCwds && now - cachedCwdsAt < PROCESS_CACHE_MS) return cachedCwds;
+  if (cachedProcesses && now - cachedProcessesAt < PROCESS_CACHE_MS) return cachedProcesses;
 
-  const cwds = new Set<string>();
+  const procs: ClaudeProcess[] = [];
   try {
     // Use ps (not pgrep) — reliable across macOS versions
+    // Also fetch %cpu to detect compaction/processing
     const psOutput = execSync(
-      "ps -eo pid=,comm= | awk '$NF == \"claude\" {print $1}'",
+      "ps -eo pid=,%cpu=,comm= | awk '$NF == \"claude\" {print $1, $2}'",
       { encoding: 'utf-8', timeout: 3000 }
     ).trim();
 
-    const pids = psOutput
-      .split('\n')
-      .filter(Boolean)
-      .map(p => parseInt(p, 10))
-      .filter(n => !isNaN(n));
+    const lines = psOutput.split('\n').filter(Boolean);
 
-    for (const pid of pids) {
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      const pid = parseInt(parts[0] ?? '', 10);
+      const cpu = parseFloat(parts[1] ?? '0');
+      if (isNaN(pid)) continue;
+
       try {
         const lsofOutput = execSync(
           `lsof -a -p ${pid} -d cwd -Fn 2>/dev/null || true`,
           { encoding: 'utf-8', timeout: 2000 }
         );
-        for (const line of lsofOutput.split('\n')) {
-          if (line.startsWith('n/')) cwds.add(line.slice(1));
+        for (const lsofLine of lsofOutput.split('\n')) {
+          if (lsofLine.startsWith('n/')) {
+            procs.push({ pid, cwd: lsofLine.slice(1), cpu });
+            break;
+          }
         }
       } catch { /* skip */ }
     }
   } catch { /* ps failed — return empty */ }
 
-  cachedCwds = cwds;
-  cachedCwdsAt = now;
-  return cwds;
+  cachedProcesses = procs;
+  cachedProcessesAt = now;
+  return procs;
+}
+
+function getRunningClaudeCwds(): Set<string> {
+  return new Set(getRunningClaudeProcesses().map(p => p.cwd));
+}
+
+/** Check if a session's claude process is actively using CPU (compaction, API call, etc.) */
+export function isSessionProcessBusy(cwd: string): boolean {
+  const procs = getRunningClaudeProcesses();
+  const proc = procs.find(p => p.cwd === cwd);
+  return proc ? proc.cpu > 1.0 : false;
 }
 
 // ---- Orphaned process cleanup ----
