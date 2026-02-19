@@ -167,14 +167,33 @@ function SessionList({
 
 // ---- Conversation View (main area) ----
 
+/** Estimate how many terminal lines an entry will occupy. */
+function estimateLines(entry: SessionEntry, width: number): number {
+  const textWidth = Math.max(20, width - 2);
+  switch (entry.type) {
+    case 'user':
+    case 'tool_use':
+      return 1;
+    case 'assistant': {
+      // 1 line for header (time + "Claude") + wrapped text lines
+      const textLines = entry.text.split('\n').reduce((acc, line) => {
+        return acc + Math.max(1, Math.ceil((line.length + 1) / textWidth));
+      }, 0);
+      return 1 + textLines;
+    }
+  }
+}
+
 function ConversationView({
   session,
   scrollOffset,
   visibleRows,
+  contentWidth,
 }: {
   session: ActiveSession | null;
   scrollOffset: number;
   visibleRows: number;
+  contentWidth: number;
 }): ReactNode {
   if (!session) {
     return (
@@ -185,9 +204,17 @@ function ConversationView({
   }
 
   const entries = session.entries;
-  const totalEntries = entries.length;
-  const endIdx = Math.max(0, totalEntries - scrollOffset);
-  const startIdx = Math.max(0, endIdx - visibleRows);
+  const endIdx = Math.max(0, entries.length - scrollOffset);
+
+  // Work backwards from endIdx, fitting as many entries as the screen allows
+  let linesUsed = 0;
+  let startIdx = endIdx;
+  for (let i = endIdx - 1; i >= 0; i--) {
+    const lines = estimateLines(entries[i]!, contentWidth);
+    if (linesUsed + lines > visibleRows) break;
+    linesUsed += lines;
+    startIdx = i;
+  }
   const visible = entries.slice(startIdx, endIdx);
 
   return (
@@ -207,7 +234,7 @@ function ConversationView({
         ))}
       </Box>
       {scrollOffset > 0 ? (
-        <Text dimColor>↑ {scrollOffset} more below — press ↓ to scroll down</Text>
+        <Text dimColor>↓ {scrollOffset} more — press ↓ to scroll down</Text>
       ) : null}
     </Box>
   );
@@ -265,6 +292,7 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
   const safeIdx = sessions.length > 0 ? Math.min(selectedIdx, sessions.length - 1) : 0;
   const selectedSession = sessions[safeIdx] ?? null;
   const visibleRows = Math.max(5, height - 5);
+  const contentWidth = Math.max(40, width - 30); // sidebar(24) + borders + padding
 
   useInput((input, key) => {
     // ---- Input mode: typing a message ----
@@ -367,7 +395,7 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
 
     if (key.upArrow) {
       setScrollOffset((prev) =>
-        Math.min(prev + 3, (selectedSession?.entries.length ?? 0) - visibleRows)
+        Math.min(prev + 3, Math.max(0, (selectedSession?.entries.length ?? 0) - 1))
       );
       return;
     }
@@ -376,7 +404,7 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
       return;
     }
     if (key.home || input === 'g') {
-      setScrollOffset(Math.max(0, (selectedSession?.entries.length ?? 0) - visibleRows));
+      setScrollOffset(Math.max(0, (selectedSession?.entries.length ?? 0) - 1));
       return;
     }
     if (key.end || input === 'G') {
@@ -428,6 +456,7 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
               session={selectedSession}
               scrollOffset={scrollOffset}
               visibleRows={visibleRows}
+              contentWidth={contentWidth}
             />
           </ErrorBoundary>
         </Box>
