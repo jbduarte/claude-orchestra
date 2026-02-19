@@ -142,7 +142,9 @@ function refreshSnapshot(): ActiveSession[] {
 }
 
 function getSnapshot(): ActiveSession[] {
-  if (sessionSnapshot.length > 0 && Date.now() - snapshotAge < 60_000) {
+  // Only return existing snapshot — never auto-refresh.
+  // User must call /sessions to refresh the list and re-number.
+  if (sessionSnapshot.length > 0) {
     return sessionSnapshot;
   }
   return refreshSnapshot();

@@ -153,7 +153,7 @@ function SessionList({
               inverse={isSelected}
             >
               <Text color={status.color}>{status.dot}</Text>{' '}
-              {sessionLabel(session)}
+              <Text dimColor>{i + 1}.</Text> {sessionLabel(session)}
             </Text>
             <Text dimColor wrap="truncate-end">
               {'  '}<Text color={status.color}>{status.label}</Text> {timeAgo(session.lastActivityMs)}
