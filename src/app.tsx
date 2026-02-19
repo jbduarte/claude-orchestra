@@ -219,19 +219,23 @@ function EntryLine({ entry }: { entry: SessionEntry }): ReactNode {
   switch (entry.type) {
     case 'user':
       return (
-        <Text wrap="truncate-end">
-          {time}
-          <Text color="green" bold>You    </Text>
-          <Text>{entry.text.split('\n')[0]?.slice(0, 200)}</Text>
-        </Text>
+        <Box flexDirection="column">
+          <Text wrap="truncate-end">
+            {time}
+            <Text color="green" bold>You    </Text>
+            <Text>{entry.text.split('\n')[0]?.slice(0, 200)}</Text>
+          </Text>
+        </Box>
       );
     case 'assistant':
       return (
-        <Text wrap="truncate-end">
-          {time}
-          <Text color="blue" bold>Claude </Text>
-          <Text>{entry.text.split('\n')[0]?.slice(0, 200)}</Text>
-        </Text>
+        <Box flexDirection="column">
+          <Text>
+            {time}
+            <Text color="blue" bold>Claude </Text>
+          </Text>
+          <Text wrap="wrap">{entry.text}</Text>
+        </Box>
       );
     case 'tool_use':
       return (

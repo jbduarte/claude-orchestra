@@ -46,7 +46,7 @@ function parseLine(line: string): { entries: SessionEntry[]; cwd?: string; model
       const text = raw.message.content;
       // Skip very short or system-looking messages
       if (text.length < 2) return { entries: [], cwd };
-      return { entries: [{ type: 'user', timestamp: ts, text: text.slice(0, 500) }], cwd };
+      return { entries: [{ type: 'user', timestamp: ts, text: text.slice(0, 2000) }], cwd };
     }
 
     // Skip user messages that are tool results (array content)
@@ -61,7 +61,7 @@ function parseLine(line: string): { entries: SessionEntry[]; cwd?: string; model
 
       for (const block of raw.message.content) {
         if (block.type === 'text' && typeof block.text === 'string' && block.text.length > 0) {
-          entries.push({ type: 'assistant', timestamp: ts, text: block.text.slice(0, 500) });
+          entries.push({ type: 'assistant', timestamp: ts, text: block.text.slice(0, 2000) });
         }
         if (block.type === 'tool_use' && typeof block.name === 'string') {
           let desc = block.name;
