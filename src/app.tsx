@@ -250,7 +250,7 @@ function EntryLine({ entry }: { entry: SessionEntry }): ReactNode {
           <Text wrap="truncate-end">
             {time}
             <Text color="green" bold>You    </Text>
-            <Text>{entry.text.split('\n')[0]?.slice(0, 200)}</Text>
+            <Text color="green">{entry.text.split('\n')[0]?.slice(0, 200)}</Text>
           </Text>
         </Box>
       );
