@@ -13,6 +13,8 @@
     "start": "tsx src/index.tsx",
     "build": "tsc",
     "dev": "tsx --watch src/index.tsx",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prepublishOnly": "npm run build"
   },
   "repository": {
@@ -44,6 +46,7 @@
     "@types/node": "25.2.3",
     "@types/react": "19.2.14",
     "tsx": "4.21.0",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "vitest": "^4.0.18"
   }
 }

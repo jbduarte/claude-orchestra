@@ -36,7 +36,7 @@ const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
 
 // ---- CWD matching (shared by Darwin + Linux) ----
 
-function matchProcessByCwd(processes: ClaudeProcess[], sessionCwd: string): ClaudeProcess | null {
+export function matchProcessByCwd(processes: ClaudeProcess[], sessionCwd: string): ClaudeProcess | null {
   let best: ClaudeProcess | null = null;
   let bestLen = -1;
 
