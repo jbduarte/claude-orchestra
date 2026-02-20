@@ -1,5 +1,4 @@
 import { openSync, readSync, closeSync, statSync, fstatSync, readdirSync, existsSync } from 'node:fs';
-import { execSync } from 'node:child_process';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { platform } from './platform.js';
@@ -138,110 +137,14 @@ function decodeProjectName(encoded: string): string {
 }
 
 // ---- Session liveness detection ----
-// Use `ps` to find running Claude processes and their CWDs.
-// NOTE: `pgrep -x claude` is unreliable on macOS (misses some processes).
-// `ps -eo pid=,comm=` is consistent and finds all of them.
+// Process detection is delegated to platform adapters (see platform.ts).
 
 const IDLE_CHECK_MS = 5 * 60 * 1000;   // Start checking after 5min idle
 const CLOSED_GRACE_MS = 5 * 60 * 1000; // Keep closed sessions visible for 5min
 
-interface ClaudeProcess {
-  pid: number;
-  cwd: string;
-  cpu: number;  // %CPU — >0 means actively processing (compaction, API call, etc.)
-}
-
-let cachedProcesses: ClaudeProcess[] | null = null;
-let cachedProcessesAt = 0;
-const PROCESS_CACHE_MS = 15_000;        // Cache for 15s
-
-function getRunningClaudeProcesses(): ClaudeProcess[] {
-  const now = Date.now();
-  if (cachedProcesses && now - cachedProcessesAt < PROCESS_CACHE_MS) return cachedProcesses;
-
-  const procs: ClaudeProcess[] = [];
-  try {
-    // Use ps (not pgrep) — reliable across macOS versions
-    // Also fetch %cpu to detect compaction/processing
-    const psOutput = execSync(
-      "ps -eo pid=,%cpu=,comm= | awk '$NF == \"claude\" {print $1, $2}'",
-      { encoding: 'utf-8', timeout: 3000 }
-    ).trim();
-
-    const lines = psOutput.split('\n').filter(Boolean);
-
-    for (const line of lines) {
-      const parts = line.trim().split(/\s+/);
-      const pid = parseInt(parts[0] ?? '', 10);
-      const cpu = parseFloat(parts[1] ?? '0');
-      if (isNaN(pid)) continue;
-
-      try {
-        const lsofOutput = execSync(
-          `lsof -a -p ${pid} -d cwd -Fn 2>/dev/null || true`,
-          { encoding: 'utf-8', timeout: 2000 }
-        );
-        for (const lsofLine of lsofOutput.split('\n')) {
-          if (lsofLine.startsWith('n/')) {
-            procs.push({ pid, cwd: lsofLine.slice(1), cpu });
-            break;
-          }
-        }
-      } catch { /* skip */ }
-    }
-  } catch { /* ps failed — return empty */ }
-
-  cachedProcesses = procs;
-  cachedProcessesAt = now;
-  return procs;
-}
-
-function getRunningClaudeCwds(): Set<string> {
-  return new Set(getRunningClaudeProcesses().map(p => p.cwd));
-}
-
 /** Check if a session's claude process is actively using CPU (compaction, API call, etc.) */
 export function isSessionProcessBusy(cwd: string): boolean {
-  const procs = getRunningClaudeProcesses();
-  const proc = procs.find(p => p.cwd === cwd);
-  return proc ? proc.cpu > 1.0 : false;
-}
-
-// ---- Orphaned process cleanup ----
-// Kill child processes spawned by Claude sessions that no longer exist.
-// These are identified by: command contains ".claude/shell-snapshots/" AND ppid=1
-// (re-parented to launchd/init after the parent claude process exited).
-
-let lastCleanupAt = 0;
-const CLEANUP_INTERVAL_MS = 60_000; // Run cleanup at most once per minute
-
-function cleanupOrphanedProcesses(): void {
-  const now = Date.now();
-  if (now - lastCleanupAt < CLEANUP_INTERVAL_MS) return;
-  lastCleanupAt = now;
-
-  try {
-    // Find processes with .claude/shell-snapshots/ in their command line
-    const output = execSync(
-      'ps -eo pid=,ppid=,command= 2>/dev/null || true',
-      { encoding: 'utf-8', timeout: 5000 }
-    );
-
-    for (const line of output.split('\n')) {
-      if (!line.includes('.claude/shell-snapshots/')) continue;
-
-      const parts = line.trim().split(/\s+/);
-      const pid = parseInt(parts[0] ?? '', 10);
-      const ppid = parseInt(parts[1] ?? '', 10);
-
-      // ppid=1 means parent died — orphaned process
-      if (!isNaN(pid) && ppid === 1 && pid !== process.pid) {
-        try {
-          process.kill(pid, 'SIGTERM');
-        } catch { /* already dead or permission denied */ }
-      }
-    }
-  } catch { /* ignore */ }
+  return platform.isSessionProcessBusy(cwd);
 }
 
 // ---- Main: find active sessions ----
@@ -346,11 +249,12 @@ export function findActiveSessions(claudeDir: string, cache: SessionCache): Acti
   }
 
   // Clean up orphaned child processes from closed sessions
-  cleanupOrphanedProcesses();
+  platform.cleanupOrphanedProcesses();
 
   // Filter out closed sessions
   const now2 = Date.now();
-  const runningCwds = getRunningClaudeCwds();
+  const runningCwds = platform.getRunningClaudeCwds();
+  const isWindows = platform.platformName === 'Windows';
 
   const alive = sessions.filter(s => {
     const idleMs = now2 - s.lastActivityMs;
@@ -358,8 +262,14 @@ export function findActiveSessions(claudeDir: string, cache: SessionCache): Acti
     // Recently active — always show (no process check needed)
     if (idleMs < IDLE_CHECK_MS) return true;
 
-    // Idle >5min — check if a Claude process is running with this CWD
-    if (s.cwd && runningCwds.has(s.cwd)) return true;
+    if (isWindows) {
+      // Windows: can't match CWD. If any claude process exists AND session was
+      // active in the last hour, consider alive. Otherwise use grace period.
+      if (runningCwds.size > 0 && idleMs < 60 * 60 * 1000) return true;
+    } else {
+      // Unix: precise CWD matching
+      if (s.cwd && runningCwds.has(s.cwd)) return true;
+    }
 
     // No matching process — session is closed. Keep for grace period, then remove.
     return idleMs < IDLE_CHECK_MS + CLOSED_GRACE_MS;

@@ -20,6 +20,8 @@ export interface PlatformAdapter {
   focusSession(sessionCwd: string): Result;
   startNewSession(cwd: string, prompt?: string): Result;
   killSession(sessionCwd: string): Result;
+  getRunningClaudeCwds(): Set<string>;
+  isSessionProcessBusy(cwd: string): boolean;
   sendNotification(title: string, body: string, sound: boolean, done: () => void): void;
   maximizeWindow(): void;
   encodeHomePath(home: string): string;
@@ -40,11 +42,11 @@ function matchProcessByCwd(processes: ClaudeProcess[], sessionCwd: string): Clau
 
   for (const p of processes) {
     if (p.cwd === sessionCwd) return p;
-    if (p.cwd && sessionCwd.startsWith(p.cwd + '/') && p.cwd.length > bestLen) {
+    if (p.cwd && (sessionCwd.startsWith(p.cwd + '/') || sessionCwd.startsWith(p.cwd + '\\')) && p.cwd.length > bestLen) {
       best = p;
       bestLen = p.cwd.length;
     }
-    if (p.cwd && p.cwd.startsWith(sessionCwd + '/') && sessionCwd.length > bestLen) {
+    if (p.cwd && (p.cwd.startsWith(sessionCwd + '/') || p.cwd.startsWith(sessionCwd + '\\')) && sessionCwd.length > bestLen) {
       best = p;
       bestLen = sessionCwd.length;
     }
@@ -124,6 +126,60 @@ class DarwinAdapter implements PlatformAdapter {
     } catch {
       // Ignore errors
     }
+  }
+
+  // ---- Liveness detection (separate from chat ops — no TTY filter, includes CPU) ----
+
+  private _livenessProcs: Array<{pid: number; cwd: string; cpu: number}> | null = null;
+  private _livenessProcAt = 0;
+  private readonly _LIVENESS_CACHE_MS = 15_000;
+
+  private getLivenessProcesses(): Array<{pid: number; cwd: string; cpu: number}> {
+    const now = Date.now();
+    if (this._livenessProcs && now - this._livenessProcAt < this._LIVENESS_CACHE_MS) {
+      return this._livenessProcs;
+    }
+
+    const procs: Array<{pid: number; cwd: string; cpu: number}> = [];
+    try {
+      const psOutput = execSync(
+        "ps -eo pid=,%cpu=,comm= | awk '$NF == \"claude\" {print $1, $2}'",
+        { encoding: 'utf-8', timeout: 3000 },
+      ).trim();
+
+      for (const line of psOutput.split('\n').filter(Boolean)) {
+        const parts = line.trim().split(/\s+/);
+        const pid = parseInt(parts[0] ?? '', 10);
+        const cpu = parseFloat(parts[1] ?? '0');
+        if (isNaN(pid)) continue;
+
+        try {
+          const lsofOutput = execSync(
+            `lsof -a -p ${pid} -d cwd -Fn 2>/dev/null || true`,
+            { encoding: 'utf-8', timeout: 2000 },
+          );
+          for (const lsofLine of lsofOutput.split('\n')) {
+            if (lsofLine.startsWith('n/')) {
+              procs.push({ pid, cwd: lsofLine.slice(1), cpu });
+              break;
+            }
+          }
+        } catch { /* skip */ }
+      }
+    } catch { /* ps failed */ }
+
+    this._livenessProcs = procs;
+    this._livenessProcAt = now;
+    return procs;
+  }
+
+  getRunningClaudeCwds(): Set<string> {
+    return new Set(this.getLivenessProcesses().map(p => p.cwd));
+  }
+
+  isSessionProcessBusy(cwd: string): boolean {
+    const proc = this.getLivenessProcesses().find(p => p.cwd === cwd);
+    return proc ? proc.cpu > 1.0 : false;
   }
 
   findProcessForSession(sessionCwd: string): ClaudeProcess | null {
@@ -632,6 +688,72 @@ class LinuxAdapter implements PlatformAdapter {
     }
   }
 
+  // ---- Liveness detection (separate from chat ops — no TTY filter, includes CPU) ----
+
+  private _livenessProcs: Array<{pid: number; cwd: string; cpu: number}> | null = null;
+  private _livenessProcAt = 0;
+  private readonly _LIVENESS_CACHE_MS = 15_000;
+
+  private getLivenessProcesses(): Array<{pid: number; cwd: string; cpu: number}> {
+    const now = Date.now();
+    if (this._livenessProcs && now - this._livenessProcAt < this._LIVENESS_CACHE_MS) {
+      return this._livenessProcs;
+    }
+
+    const procs: Array<{pid: number; cwd: string; cpu: number}> = [];
+    try {
+      const psOutput = execSync(
+        "ps -eo pid=,%cpu=,comm= | awk '$NF == \"claude\" {print $1, $2}'",
+        { encoding: 'utf-8', timeout: 3000 },
+      ).trim();
+
+      for (const line of psOutput.split('\n').filter(Boolean)) {
+        const parts = line.trim().split(/\s+/);
+        const pid = parseInt(parts[0] ?? '', 10);
+        const cpu = parseFloat(parts[1] ?? '0');
+        if (isNaN(pid)) continue;
+
+        let cwd: string | undefined;
+
+        // Try lsof first
+        try {
+          const lsofOutput = execSync(
+            `lsof -a -p ${pid} -d cwd -Fn 2>/dev/null || true`,
+            { encoding: 'utf-8', timeout: 2000 },
+          );
+          for (const lsofLine of lsofOutput.split('\n')) {
+            if (lsofLine.startsWith('n/')) {
+              cwd = lsofLine.slice(1);
+              break;
+            }
+          }
+        } catch {
+          // lsof failed — try /proc fallback
+          try {
+            cwd = readlinkSync(`/proc/${pid}/cwd`);
+          } catch { /* skip */ }
+        }
+
+        if (cwd) {
+          procs.push({ pid, cwd, cpu });
+        }
+      }
+    } catch { /* ps failed */ }
+
+    this._livenessProcs = procs;
+    this._livenessProcAt = now;
+    return procs;
+  }
+
+  getRunningClaudeCwds(): Set<string> {
+    return new Set(this.getLivenessProcesses().map(p => p.cwd));
+  }
+
+  isSessionProcessBusy(cwd: string): boolean {
+    const proc = this.getLivenessProcesses().find(p => p.cwd === cwd);
+    return proc ? proc.cpu > 1.0 : false;
+  }
+
   findProcessForSession(sessionCwd: string): ClaudeProcess | null {
     return matchProcessByCwd(this.getRunningClaudeProcesses(), sessionCwd);
   }
@@ -830,6 +952,20 @@ class WindowsAdapter implements PlatformAdapter {
 
   cleanupOrphanedProcesses(): void {
     // Skipped on Windows — ppid=1 is Unix-only
+  }
+
+  getRunningClaudeCwds(): Set<string> {
+    // Windows: can't get CWD from tasklist. Return sentinel if any claude process exists.
+    const processes = this.getRunningClaudeProcesses();
+    if (processes.length > 0) {
+      return new Set(['__windows_has_claude_process__']);
+    }
+    return new Set();
+  }
+
+  isSessionProcessBusy(_cwd: string): boolean {
+    // No CPU data available from tasklist
+    return false;
   }
 
   findProcessForSession(_sessionCwd: string): ClaudeProcess | null {
