@@ -1,8 +1,8 @@
 # Claude Orchestra
 
-Terminal dashboard for monitoring and managing multiple Claude Code sessions in parallel.
+Terminal dashboard for monitoring and managing multiple Claude Code sessions in parallel — from your computer or your phone.
 
-Watches `~/.claude/` for active sessions, teams, tasks, and agent messages — renders a live fullscreen TUI with desktop and Telegram notifications. When your sessions need attention, the Orchestra lets you know: *"Awaiting the Maestro."*
+Watches `~/.claude/` for active sessions, teams, tasks, and agent messages — renders a live fullscreen TUI with desktop notifications. Built-in Telegram bot gives you **full remote control from your phone**: check session status, send messages to agents, start new sessions, kill running ones — everything you can do in the terminal, you can do from Telegram. When your sessions need attention, the Orchestra lets you know: *"Awaiting the Maestro."*
 
 ## Features
 
@@ -11,7 +11,7 @@ Watches `~/.claude/` for active sessions, teams, tasks, and agent messages — r
 - **Teams and tasks** — Tracks Claude Code teams, task progress, and agent statuses
 - **Messages** — Displays agent messages with highlighted action items (plan approvals, shutdown requests)
 - **Desktop notifications** — macOS/Linux alerts when sessions finish, need input, or require approval
-- **Telegram bot** — Monitor sessions and send messages from your phone
+- **Full remote control via Telegram** — Monitor, message, start, and kill sessions from your phone — everything the terminal can do, your phone can too
 - **Send to session** — Type messages directly into running sessions via keystroke injection (Terminal.app, iTerm2, PyCharm, JetBrains IDEs)
 - **Smart liveness detection** — Filters out closed sessions using process detection, with grace periods to avoid flickering
 
@@ -72,9 +72,9 @@ claude-orchestra /path/to/dir
 
 **Messages** — Recent agent messages across all inboxes, with highlighted action items
 
-## Telegram Bot (Optional)
+## Telegram Bot — Full Control From Your Phone
 
-Monitor your sessions remotely and send messages from your phone.
+Everything you can do in the terminal dashboard, you can do from Telegram. Check on your agents while away from the desk, send instructions from the couch, kill a runaway session from the bus. The bot pushes real-time notifications and accepts commands — it's your Orchestra in your pocket.
 
 ### Setup
 
