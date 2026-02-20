@@ -15,29 +15,30 @@ Watches `~/.claude/` for active sessions, teams, tasks, and agent messages — r
 - **Send to session** — Type messages directly into running sessions via keystroke injection (Terminal.app, iTerm2, PyCharm, JetBrains IDEs)
 - **Smart liveness detection** — Filters out closed sessions using process detection, with grace periods to avoid flickering
 
-## Install
+## Quick Start
 
-**Prerequisite:** [Node.js](https://nodejs.org/) >= 20 (includes npm). Install via [nodejs.org](https://nodejs.org/) or Homebrew: `brew install node`
+**1. Install Node.js** (if you don't have it already):
+
+```sh
+brew install node        # macOS (Homebrew)
+# or download from https://nodejs.org/ (v20+)
+```
+
+**2. Install Claude Orchestra:**
 
 ```sh
 npm install -g @jbduarte/claude-orchestra
 ```
 
-Or run directly without installing:
-
-```sh
-npx @jbduarte/claude-orchestra
-```
-
-## Usage
-
-Open a terminal and run:
+**3. Run it in a terminal:**
 
 ```sh
 claude-orchestra
 ```
 
 That's it. The dashboard launches fullscreen and auto-detects all running Claude Code sessions.
+
+> **Tip:** You can also run without installing: `npx @jbduarte/claude-orchestra`
 
 To monitor a custom directory instead of `~/.claude/`:
 
