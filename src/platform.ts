@@ -72,9 +72,9 @@ class DarwinAdapter implements PlatformAdapter {
 
   getRunningClaudeProcesses(): ClaudeProcess[] {
     try {
-      // Use ps + awk for reliable detection on macOS
+      // Include TTY-less processes (tty=??) so IDEs like PyCharm are detected
       const psOutput = execSync(
-        "ps -eo pid=,tty=,comm= | awk '$3 == \"claude\" && $2 != \"??\" {print $1, $2}'",
+        "ps -eo pid=,tty=,comm= | awk '$3 == \"claude\" {print $1, $2}'",
         { encoding: 'utf-8', timeout: 5000 },
       );
 
@@ -85,7 +85,7 @@ class DarwinAdapter implements PlatformAdapter {
         const parts = trimmed.split(/\s+/);
         const pid = parseInt(parts[0] ?? '', 10);
         const tty = parts[1];
-        if (!pid || !tty || isNaN(pid)) continue;
+        if (!pid || isNaN(pid)) continue;
 
         try {
           const lsofOutput = execSync(`lsof -a -p ${pid} -d cwd -Fn 2>/dev/null || true`, {
@@ -94,7 +94,7 @@ class DarwinAdapter implements PlatformAdapter {
           });
           for (const l of lsofOutput.split('\n')) {
             if (l.startsWith('n/')) {
-              processes.push({ pid, tty, cwd: l.slice(1) });
+              processes.push({ pid, tty: tty === '??' ? undefined : tty, cwd: l.slice(1) });
               break;
             }
           }
@@ -492,18 +492,20 @@ class DarwinAdapter implements PlatformAdapter {
       return { success: false, error: 'No running process found' };
     }
 
-    const ttyDevice = `/dev/${proc.tty}`;
     const app = this.findParentApp(proc.pid);
     const projectName = this.projectNameFromCwd(sessionCwd);
 
     let success = false;
 
-    if (!app || app.displayName === 'Terminal') {
+    if (proc.tty && (!app || app.displayName === 'Terminal')) {
       // Terminal.app: use TTY-based tab targeting with clipboard paste
+      const ttyDevice = `/dev/${proc.tty}`;
       success = this.sendViaTerminal(ttyDevice, message);
-    } else {
+    } else if (app) {
       // IDEs and multi-window apps: match window by project name
       success = this.sendViaAppWindow(app, projectName, message);
+    } else {
+      return { success: false, error: 'Session window not found — no TTY and no parent app detected' };
     }
 
     if (success) {

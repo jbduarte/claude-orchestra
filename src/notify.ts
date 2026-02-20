@@ -152,7 +152,7 @@ function isDuplicate(key: string): boolean {
 // ---- Serialized dispatch (max 1 notification process at a time) ----
 
 let pending = false;
-const queue: Array<{ title: string; body: string; sound: boolean; telegramBody?: string }> = [];
+const queue: Array<{ title: string; body: string; sound: boolean; telegramBody?: string; desktopNotify: boolean }> = [];
 
 function processQueue(): void {
   if (pending || queue.length === 0) return;
@@ -167,8 +167,12 @@ function processQueue(): void {
   // Always send to Telegram (async, non-blocking) — use full body if available
   sendTelegram(item.title, item.telegramBody ?? item.body);
 
-  // Platform-specific desktop notification
-  platform.sendNotification(item.title, item.body, item.sound, done);
+  // Desktop notification only for idle / needs_input — skip for task_completed, new_message
+  if (item.desktopNotify) {
+    platform.sendNotification(item.title, item.body, item.sound, done);
+  } else {
+    done();
+  }
 }
 
 // ---- Public API ----
@@ -186,7 +190,7 @@ export function isNotificationsEnabled(): boolean {
 export function sendNotification(event: NotificationEvent): void {
   if (!enabled) return;
   if (isDuplicate(event.dedupeKey)) return;
-  const sound = event.type === 'agent_idle' || event.type === 'needs_input';
-  queue.push({ title: event.title, body: event.body, sound, telegramBody: event.telegramBody });
+  const desktopNotify = event.type === 'agent_idle' || event.type === 'needs_input';
+  queue.push({ title: event.title, body: event.body, sound: desktopNotify, desktopNotify, telegramBody: event.telegramBody });
   processQueue();
 }
