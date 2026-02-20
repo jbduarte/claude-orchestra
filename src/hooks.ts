@@ -133,6 +133,7 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
   const debouncedRef = useRef<ReturnType<typeof debounce> | null>(null);
   const workingSessionsRef = useRef(new Set<string>());
   const knownSessionsRef = useRef(new Set<string>());
+  const notifiedIdleRef = useRef(new Set<string>());
   const killedCwdsRef = useRef(new Set<string>());
   const isFirstRefresh = useRef(true);
 
@@ -175,33 +176,25 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
           if (s.cwd && isSessionProcessBusy(s.cwd)) nowWorking.add(s.sessionId);
         }
       }
+      // Clear idle-notified flag for sessions that are working again
+      for (const id of nowWorking) {
+        notifiedIdleRef.current.delete(id);
+      }
       // Sessions that WERE working but are NOW idle (working→idle transition)
+      // Only notify ONCE per idle period — cleared when session goes back to working
       for (const id of workingSessionsRef.current) {
-        if (!nowWorking.has(id)) {
+        if (!nowWorking.has(id) && !notifiedIdleRef.current.has(id)) {
           const s = newData.sessions.find(sess => sess.sessionId === id);
           if (s) {
             const label = (s.cwd ? basename(s.cwd) : undefined) ?? s.project;
+            notifiedIdleRef.current.add(id);
             events.push({
               type: 'agent_idle',
               title: 'Awaiting the Maestro',
               body: `${label} awaits your direction, Maestro`,
-              dedupeKey: `idle:${s.sessionId}:${Math.floor(s.lastActivityMs / 60000)}`,
+              dedupeKey: `idle:${s.sessionId}`,
             });
           }
-        }
-      }
-      // Also detect sessions that are idle but we never saw as working
-      // (e.g. dashboard started after session went idle) — skip first refresh to avoid spam
-      for (const s of newData.sessions) {
-        if (!isFirstRefresh.current && !nowWorking.has(s.sessionId) && !knownSessionsRef.current.has(s.sessionId)) {
-          // First time seeing this idle session — only notify once
-          const label = (s.cwd ? basename(s.cwd) : undefined) ?? s.project;
-          events.push({
-            type: 'agent_idle',
-            title: 'Awaiting the Maestro',
-            body: `${label} awaits your direction, Maestro`,
-            dedupeKey: `idle:${s.sessionId}:${Math.floor(s.lastActivityMs / 60000)}`,
-          });
         }
       }
       // Track all known sessions (working + idle we've already seen)

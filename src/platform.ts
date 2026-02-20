@@ -22,6 +22,7 @@ export interface PlatformAdapter {
   killSession(sessionCwd: string): Result;
   getRunningClaudeCwds(): Set<string>;
   isSessionProcessBusy(cwd: string): boolean;
+  invalidateLivenessCache(): void;
   sendNotification(title: string, body: string, sound: boolean, done: () => void): void;
   maximizeWindow(): void;
   encodeHomePath(home: string): string;
@@ -171,6 +172,11 @@ class DarwinAdapter implements PlatformAdapter {
     this._livenessProcs = procs;
     this._livenessProcAt = now;
     return procs;
+  }
+
+  invalidateLivenessCache(): void {
+    this._livenessProcs = null;
+    this._livenessProcAt = 0;
   }
 
   getRunningClaudeCwds(): Set<string> {
@@ -542,10 +548,29 @@ class DarwinAdapter implements PlatformAdapter {
 
     try {
       process.kill(proc.pid, 'SIGTERM');
-      return { success: true };
     } catch (err) {
       return { success: false, error: `Failed to kill process: ${(err as Error).message}` };
     }
+
+    // Wait briefly then verify death; escalate to SIGKILL if needed
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      try {
+        process.kill(proc.pid, 0);
+      } catch {
+        this.invalidateLivenessCache();
+        return { success: true };
+      }
+      execSync('sleep 0.2', { timeout: 1000 });
+    }
+
+    // Still alive — force kill
+    try {
+      process.kill(proc.pid, 'SIGKILL');
+    } catch { /* already dead or permission denied */ }
+
+    this.invalidateLivenessCache();
+    return { success: true };
   }
 
   sendNotification(title: string, body: string, sound: boolean, done: () => void): void {
@@ -745,6 +770,11 @@ class LinuxAdapter implements PlatformAdapter {
     return procs;
   }
 
+  invalidateLivenessCache(): void {
+    this._livenessProcs = null;
+    this._livenessProcAt = 0;
+  }
+
   getRunningClaudeCwds(): Set<string> {
     return new Set(this.getLivenessProcesses().map(p => p.cwd));
   }
@@ -860,10 +890,28 @@ class LinuxAdapter implements PlatformAdapter {
 
     try {
       process.kill(proc.pid, 'SIGTERM');
-      return { success: true };
     } catch (err) {
       return { success: false, error: `Failed to kill process: ${(err as Error).message}` };
     }
+
+    // Wait briefly then verify death; escalate to SIGKILL if needed
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      try {
+        process.kill(proc.pid, 0);
+      } catch {
+        this.invalidateLivenessCache();
+        return { success: true };
+      }
+      execSync('sleep 0.2', { timeout: 1000 });
+    }
+
+    try {
+      process.kill(proc.pid, 'SIGKILL');
+    } catch { /* already dead or permission denied */ }
+
+    this.invalidateLivenessCache();
+    return { success: true };
   }
 
   sendNotification(title: string, body: string, _sound: boolean, done: () => void): void {
@@ -966,6 +1014,10 @@ class WindowsAdapter implements PlatformAdapter {
   isSessionProcessBusy(_cwd: string): boolean {
     // No CPU data available from tasklist
     return false;
+  }
+
+  invalidateLivenessCache(): void {
+    // No liveness cache on Windows
   }
 
   findProcessForSession(_sessionCwd: string): ClaudeProcess | null {

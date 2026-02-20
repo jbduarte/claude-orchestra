@@ -20,7 +20,7 @@ export const AUTO_REFRESH_MS = 5_000;              // 5 seconds — safety net f
 
 // ---- Notifications ----
 
-export const NOTIFICATION_DEDUP_MS = 30_000;   // 30 seconds
+export const NOTIFICATION_DEDUP_MS = 5 * 60_000;   // 5 minutes
 export const MAX_NOTIFICATION_LENGTH = 200;
 
 // ---- Display ----

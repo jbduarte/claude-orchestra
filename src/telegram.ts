@@ -3,6 +3,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { sendToSession, startNewSession, killSession } from './chat.js';
 import { findActiveSessions } from './sessions.js';
+import { platform } from './platform.js';
 import type { SessionCache } from './sessions.js';
 import type { ActiveSession } from './types.js';
 
@@ -63,6 +64,9 @@ function telegramApi(method: string, body?: Record<string, unknown>): Promise<Re
         });
       }
     );
+    req.on('timeout', () => {
+      req.destroy(new Error('Telegram API request timed out'));
+    });
     req.on('error', reject);
     if (payload) req.write(payload);
     req.end();
@@ -141,9 +145,9 @@ function refreshSnapshot(): ActiveSession[] {
 }
 
 function getSnapshot(): ActiveSession[] {
-  // Only return existing snapshot — never auto-refresh.
-  // User must call /sessions to refresh the list and re-number.
-  if (sessionSnapshot.length > 0) {
+  // Return cached snapshot if fresh enough; auto-refresh after 30s
+  // so indices stay stable for quick /send but don't go permanently stale.
+  if (sessionSnapshot.length > 0 && Date.now() - snapshotAge < 30_000) {
     return sessionSnapshot;
   }
   return refreshSnapshot();
@@ -206,7 +210,11 @@ function handleSend(args: string): void {
   if (result.success) {
     sendReply(`✅ Sent to <b>${idx + 1}. ${esc(label)}</b>:\n<code>${esc(message)}</code>`);
   } else {
-    sendReply(`❌ Failed sending to ${esc(label)}: ${esc(result.error ?? 'unknown error')}`);
+    // Session may have died — invalidate snapshot so next attempt gets fresh list
+    platform.invalidateLivenessCache();
+    sessionSnapshot = [];
+    snapshotAge = 0;
+    sendReply(`❌ Failed sending to ${esc(label)}: ${esc(result.error ?? 'unknown error')}\nRun /sessions to refresh.`);
   }
 }
 
@@ -277,7 +285,11 @@ function handleKill(args: string): void {
 
   const result = killSession(session.cwd);
   if (result.success) {
-    sendReply(`🔴 Killed <b>${idx + 1}. ${esc(label)}</b>\nRun /sessions to refresh the list.`);
+    // Invalidate caches so subsequent commands see fresh state
+    platform.invalidateLivenessCache();
+    sessionSnapshot = [];
+    snapshotAge = 0;
+    sendReply(`🔴 Killed <b>${idx + 1}. ${esc(label)}</b>`);
   } else {
     sendReply(`❌ Failed to kill ${esc(label)}: ${esc(result.error ?? 'unknown error')}`);
   }
@@ -342,7 +354,13 @@ async function poll(): Promise<void> {
         if (chat?.['id'] !== config.chatId) continue;
 
         const text = msg['text'] as string | undefined;
-        if (text) handleMessage(text);
+        if (text) {
+          try {
+            handleMessage(text);
+          } catch {
+            // Don't let a single message crash the poll loop
+          }
+        }
       }
     }
   } catch {
