@@ -124,7 +124,7 @@ function computeNotifications(
 
 // ---- Main data hook ----
 
-export function useClaudeData(claudeDir: string): DataState & { forceRefresh: () => void } {
+export function useClaudeData(claudeDir: string): DataState & { forceRefresh: () => void; markKilled: (cwd: string) => void } {
   const [data, dispatch] = useReducer(dataReducer, initialDataState);
   const cacheRef = useRef<FileCache>(new Map());
   const sessionCacheRef = useRef<SessionCache>(new Map());
@@ -133,12 +133,24 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
   const debouncedRef = useRef<ReturnType<typeof debounce> | null>(null);
   const workingSessionsRef = useRef(new Set<string>());
   const knownSessionsRef = useRef(new Set<string>());
+  const killedCwdsRef = useRef(new Set<string>());
   const isFirstRefresh = useRef(true);
 
   const doRefresh = useCallback(() => {
     const raw = readAllData(claudeDir, cacheRef.current);
     const teams = enrichTeamStatuses(raw.teams, raw.messages);
-    const sessions = findActiveSessions(claudeDir, sessionCacheRef.current);
+    const allSessions = findActiveSessions(claudeDir, sessionCacheRef.current);
+
+    // Filter out sessions killed by the user; self-clean once they naturally expire
+    const killed = killedCwdsRef.current;
+    const activeCwds = new Set(allSessions.map(s => s.cwd).filter(Boolean));
+    for (const cwd of killed) {
+      if (!activeCwds.has(cwd)) killed.delete(cwd);
+    }
+    const sessions = killed.size > 0
+      ? allSessions.filter(s => !s.cwd || !killed.has(s.cwd))
+      : allSessions;
+
     const newData = { ...raw, teams, sessions };
 
     // Compute notification diff BEFORE dispatch
@@ -265,5 +277,11 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
     doRefresh();
   }, [doRefresh]);
 
-  return { ...data, forceRefresh };
+  const markKilled = useCallback((cwd: string) => {
+    killedCwdsRef.current.add(cwd);
+    debouncedRef.current?.cancel();
+    doRefresh();
+  }, [doRefresh]);
+
+  return { ...data, forceRefresh, markKilled };
 }

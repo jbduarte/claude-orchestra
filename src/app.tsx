@@ -281,7 +281,7 @@ function EntryLine({ entry }: { entry: SessionEntry }): ReactNode {
 export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
   const { exit } = useApp();
   const { width, height } = useScreenSize();
-  const { sessions, loading, forceRefresh } = useClaudeData(claudeDir);
+  const { sessions, loading, forceRefresh, markKilled } = useClaudeData(claudeDir);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [scrollOffset, setScrollOffset] = useState(0);
   const [notificationsOn, setNotificationsOn] = useState(true);
@@ -366,10 +366,10 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
         const result = killSession(selectedSession.cwd);
         if (result.success) {
           setStatusMsg(`Killed ${label}`);
+          markKilled(selectedSession.cwd);
         } else {
           setStatusMsg(`Kill failed: ${result.error}`);
         }
-        setTimeout(() => forceRefresh(), 1000);
         setTimeout(() => setStatusMsg(''), 3000);
       }
       return;
