@@ -4,6 +4,8 @@ Terminal dashboard for monitoring and managing multiple Claude Code sessions in 
 
 Watches `~/.claude/` for active sessions, teams, tasks, and agent messages — renders a live fullscreen TUI with desktop notifications. Built-in Telegram bot gives you **full remote control from your phone**: check session status, send messages to agents, start new sessions, kill running ones — everything you can do in the terminal, you can do from Telegram. When your sessions need attention, the Orchestra lets you know: *"Awaiting the Maestro."*
 
+![Claude Orchestra Dashboard](docs/images/dashboard.png)
+
 ## Features
 
 - **Live session monitoring** — Detects all running Claude Code sessions across Terminal.app, iTerm2, PyCharm, VS Code, and other terminals/IDEs
@@ -76,11 +78,19 @@ claude-orchestra /path/to/dir
 
 Everything you can do in the terminal dashboard, you can do from Telegram. Check on your agents while away from the desk, send instructions from the couch, kill a runaway session from the bus. The bot pushes real-time notifications and accepts commands — it's your Orchestra in your pocket.
 
+![Telegram Bot](docs/images/telegram.png)
+
 ### Setup
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) on Telegram and get the bot token
 2. Get your chat ID (message [@userinfobot](https://t.me/userinfobot) on Telegram)
-3. Create a `config.json` in the claude-orchestra directory:
+3. Copy the example config and fill in your credentials:
+
+```sh
+cp config.example.json config.json
+```
+
+Edit `config.json` with your bot token and chat ID:
 
 ```json
 {
@@ -91,6 +101,8 @@ Everything you can do in the terminal dashboard, you can do from Telegram. Check
 }
 ```
 
+> **Note:** `config.json` is gitignored — your credentials stay local.
+
 4. Restart claude-orchestra — the bot starts automatically
 
 ### Telegram Commands
@@ -98,14 +110,44 @@ Everything you can do in the terminal dashboard, you can do from Telegram. Check
 | Command | Description |
 |---------|-------------|
 | `/sessions` | List all active sessions with status |
-| `/send N message` | Send a message to session N |
-| `/kill N` | Kill session N |
+| `/send name message` | Send a message to a session by project name or number |
+| `/kill name` | Kill a session by project name or number |
 | `/new /path/to/project [prompt]` | Start a new Claude session in Terminal.app |
 | `/help` | Show available commands |
 
-Shortcuts: `/s` for `/sessions`, `N message` for `/send N message`.
+Sessions can be targeted by **project name** (stable) or by index number:
+
+```
+/send orchestra fix the bug    ← by name
+/send 1 fix the bug            ← by index
+orchestra fix the bug          ← shorthand
+```
+
+Shortcuts: `/s` for `/sessions`.
 
 The bot also forwards notifications: session completions, idle alerts, and action items.
+
+## Configuration
+
+Create a `config.json` in the claude-orchestra directory (see `config.example.json`):
+
+```json
+{
+  "telegram": {
+    "botToken": "YOUR_BOT_TOKEN",
+    "chatId": "YOUR_CHAT_ID"
+  },
+  "skipPermissions": false
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `telegram.botToken` | — | Telegram bot token from [@BotFather](https://t.me/BotFather) |
+| `telegram.chatId` | — | Your Telegram chat ID from [@userinfobot](https://t.me/userinfobot) |
+| `skipPermissions` | `false` | Start new sessions with `--dangerously-skip-permissions`. Only enable this if you understand the implications — it allows Claude to run commands without confirmation. |
+
+> `config.json` is gitignored — your credentials and settings stay local.
 
 ## Supported Terminals and IDEs
 

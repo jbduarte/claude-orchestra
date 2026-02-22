@@ -13,6 +13,7 @@ interface TelegramConfig {
 }
 
 let telegramConfig: TelegramConfig | null = null;
+let skipPermissions = false;
 
 export function loadTelegramConfig(configDir: string): void {
   try {
@@ -24,9 +25,16 @@ export function loadTelegramConfig(configDir: string): void {
         chatId: Number(raw.telegram.chatId),
       };
     }
+    if (raw?.skipPermissions === true) {
+      skipPermissions = true;
+    }
   } catch {
     // No config file or invalid — Telegram disabled
   }
+}
+
+export function getSkipPermissions(): boolean {
+  return skipPermissions;
 }
 
 // ---- Telegram sender ----

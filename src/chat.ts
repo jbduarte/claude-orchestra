@@ -9,8 +9,8 @@ export function sendToSession(sessionCwd: string, message: string): Result {
   return platform.sendToSession(sessionCwd, message);
 }
 
-export function startNewSession(cwd: string, prompt?: string): Result {
-  return platform.startNewSession(cwd, prompt);
+export function startNewSession(cwd: string, prompt?: string, skipPermissions?: boolean): Result {
+  return platform.startNewSession(cwd, prompt, skipPermissions);
 }
 
 export function killSession(sessionCwd: string): Result {

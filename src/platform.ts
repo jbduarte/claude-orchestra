@@ -18,7 +18,7 @@ export interface PlatformAdapter {
   findProcessForSession(sessionCwd: string): ClaudeProcess | null;
   sendToSession(sessionCwd: string, message: string): Result;
   focusSession(sessionCwd: string): Result;
-  startNewSession(cwd: string, prompt?: string): Result;
+  startNewSession(cwd: string, prompt?: string, skipPermissions?: boolean): Result;
   killSession(sessionCwd: string): Result;
   getRunningClaudeCwds(): Set<string>;
   isSessionProcessBusy(cwd: string): boolean;
@@ -514,10 +514,11 @@ class DarwinAdapter implements PlatformAdapter {
     return { success: false, error: 'Session window not found — it may have closed' };
   }
 
-  startNewSession(cwd: string, prompt?: string): Result {
+  startNewSession(cwd: string, prompt?: string, skipPermissions?: boolean): Result {
+    const permsFlag = skipPermissions ? ' --dangerously-skip-permissions' : '';
     const shellCmd = prompt
-      ? `cd ${shellEscape(cwd)} && claude --dangerously-skip-permissions ${shellEscape(prompt)}`
-      : `cd ${shellEscape(cwd)} && claude --dangerously-skip-permissions`;
+      ? `cd ${shellEscape(cwd)} && claude${permsFlag} ${shellEscape(prompt)}`
+      : `cd ${shellEscape(cwd)} && claude${permsFlag}`;
 
     // Start session in new Terminal tab, then refocus orchestra
     const script = `
@@ -855,10 +856,11 @@ class LinuxAdapter implements PlatformAdapter {
     }
   }
 
-  startNewSession(cwd: string, prompt?: string): Result {
+  startNewSession(cwd: string, prompt?: string, skipPermissions?: boolean): Result {
+    const permsFlag = skipPermissions ? ' --dangerously-skip-permissions' : '';
     const claudeCmd = prompt
-      ? `cd ${shellEscape(cwd)} && claude --dangerously-skip-permissions ${shellEscape(prompt)}`
-      : `cd ${shellEscape(cwd)} && claude --dangerously-skip-permissions`;
+      ? `cd ${shellEscape(cwd)} && claude${permsFlag} ${shellEscape(prompt)}`
+      : `cd ${shellEscape(cwd)} && claude${permsFlag}`;
 
     const terminals: Array<{ cmd: string; args: string[] }> = [
       { cmd: 'gnome-terminal', args: ['--', 'bash', '-c', claudeCmd + '; exec bash'] },
@@ -1077,10 +1079,11 @@ class WindowsAdapter implements PlatformAdapter {
     }
   }
 
-  startNewSession(cwd: string, prompt?: string): Result {
+  startNewSession(cwd: string, prompt?: string, skipPermissions?: boolean): Result {
+    const permsFlag = skipPermissions ? ' --dangerously-skip-permissions' : '';
     const claudeCmd = prompt
-      ? `claude --dangerously-skip-permissions ${prompt}`
-      : 'claude --dangerously-skip-permissions';
+      ? `claude${permsFlag} ${prompt}`
+      : `claude${permsFlag}`;
 
     try {
       // Try Windows Terminal first

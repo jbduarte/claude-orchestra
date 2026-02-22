@@ -1,0 +1,7 @@
+{
+  "telegram": {
+    "botToken": "YOUR_BOT_TOKEN_FROM_BOTFATHER",
+    "chatId": "YOUR_CHAT_ID_FROM_USERINFOBOT"
+  },
+  "skipPermissions": false
+}

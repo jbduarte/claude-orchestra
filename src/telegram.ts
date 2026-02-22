@@ -12,6 +12,7 @@ import type { ActiveSession } from './types.js';
 interface TelegramConfig {
   botToken: string;
   chatId: number;
+  skipPermissions?: boolean;
 }
 
 let config: TelegramConfig | null = null;
@@ -19,10 +20,6 @@ let claudeDir = '';
 let sessionCache: SessionCache = new Map();
 let lastUpdateId = 0;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
-
-// Snapshot: freeze session list so /send uses the same order as /sessions
-let sessionSnapshot: ActiveSession[] = [];
-let snapshotAge = 0;
 
 // ---- HTML escaping (safe for all dynamic content) ----
 
@@ -101,6 +98,48 @@ function sessionLabel(s: ActiveSession): string {
   return s.project || s.sessionId.slice(0, 7);
 }
 
+/** Resolve a session by 1-based index or project name (case-insensitive substring). */
+function findSession(query: string): { session: ActiveSession; index: number; sessions: ActiveSession[] } | { error: string; sessions: ActiveSession[] } {
+  const sessions = getSessions();
+  if (sessions.length === 0) {
+    return { error: 'No active sessions.', sessions };
+  }
+
+  // Try numeric index first
+  const num = parseInt(query, 10);
+  if (!isNaN(num) && String(num) === query.trim()) {
+    const idx = num - 1;
+    if (idx < 0 || idx >= sessions.length) {
+      return { error: `Invalid index ${num}. Run /sessions to see available (1-${sessions.length}).`, sessions };
+    }
+    return { session: sessions[idx]!, index: idx, sessions };
+  }
+
+  // Name-based matching (case-insensitive)
+  const q = query.toLowerCase();
+  const matches: Array<{ session: ActiveSession; index: number }> = [];
+  for (let i = 0; i < sessions.length; i++) {
+    const label = sessionLabel(sessions[i]!).toLowerCase();
+    if (label === q) {
+      // Exact match — return immediately
+      return { session: sessions[i]!, index: i, sessions };
+    }
+    if (label.includes(q)) {
+      matches.push({ session: sessions[i]!, index: i });
+    }
+  }
+
+  if (matches.length === 1) {
+    return { session: matches[0]!.session, index: matches[0]!.index, sessions };
+  }
+  if (matches.length > 1) {
+    const list = matches.map(m => `  ${m.index + 1}. ${esc(sessionLabel(m.session))}`).join('\n');
+    return { error: `Multiple sessions match "${esc(query)}":\n${list}\nBe more specific or use the number.`, sessions };
+  }
+
+  return { error: `No session matching "${esc(query)}". Run /sessions to see available.`, sessions };
+}
+
 function timeAgo(ms: number): string {
   const diff = Date.now() - ms;
   if (diff < 60_000) return 'just now';
@@ -136,27 +175,10 @@ function lastActivity(s: ActiveSession): string {
   return 'no activity';
 }
 
-// ---- Snapshot management ----
-
-function refreshSnapshot(): ActiveSession[] {
-  sessionSnapshot = getSessions();
-  snapshotAge = Date.now();
-  return sessionSnapshot;
-}
-
-function getSnapshot(): ActiveSession[] {
-  // Return cached snapshot if fresh enough; auto-refresh after 30s
-  // so indices stay stable for quick /send but don't go permanently stale.
-  if (sessionSnapshot.length > 0 && Date.now() - snapshotAge < 30_000) {
-    return sessionSnapshot;
-  }
-  return refreshSnapshot();
-}
-
 // ---- Command handlers ----
 
 function handleSessions(): void {
-  const sessions = refreshSnapshot();
+  const sessions = getSessions();
   if (sessions.length === 0) {
     sendReply('No active sessions.');
     return;
@@ -183,38 +205,36 @@ function handleSessions(): void {
 }
 
 function handleSend(args: string): void {
-  const match = args.match(/^(\d+)\s+(.+)/s);
+  // Parse: first token is session identifier (number or name), rest is the message
+  const match = args.match(/^(\S+)\s+(.+)/s);
   if (!match) {
-    sendReply('Usage: <code>/send 1 fix the bug</code>');
+    sendReply('Usage: <code>/send orchestra fix the bug</code>\nor: <code>/send 1 fix the bug</code>');
     return;
   }
 
-  const idx = parseInt(match[1]!, 10) - 1;
+  const query = match[1]!;
   const message = match[2]!.trim();
 
-  const sessions = getSnapshot();
-  if (idx < 0 || idx >= sessions.length) {
-    sendReply(`Invalid session. Run /sessions first.\nAvailable: 1-${sessions.length}`);
+  const result = findSession(query);
+  if ('error' in result) {
+    sendReply(result.error);
     return;
   }
 
-  const session = sessions[idx]!;
+  const { session, index } = result;
   const label = sessionLabel(session);
 
   if (!session.cwd) {
-    sendReply(`Session ${idx + 1} (${esc(label)}) has no CWD — cannot send.`);
+    sendReply(`Session ${index + 1} (${esc(label)}) has no CWD — cannot send.`);
     return;
   }
 
-  const result = sendToSession(session.cwd, message);
-  if (result.success) {
-    sendReply(`✅ Sent to <b>${idx + 1}. ${esc(label)}</b>:\n<code>${esc(message)}</code>`);
+  const sendResult = sendToSession(session.cwd, message);
+  if (sendResult.success) {
+    sendReply(`✅ Sent to <b>${index + 1}. ${esc(label)}</b>:\n<code>${esc(message)}</code>`);
   } else {
-    // Session may have died — invalidate snapshot so next attempt gets fresh list
     platform.invalidateLivenessCache();
-    sessionSnapshot = [];
-    snapshotAge = 0;
-    sendReply(`❌ Failed sending to ${esc(label)}: ${esc(result.error ?? 'unknown error')}\nRun /sessions to refresh.`);
+    sendReply(`❌ Failed sending to ${esc(label)}: ${esc(sendResult.error ?? 'unknown error')}\nRun /sessions to refresh.`);
   }
 }
 
@@ -256,7 +276,7 @@ function handleNew(args: string): void {
 
   const { cwd, prompt } = parseCwdAndPrompt(args.trim());
 
-  const result = startNewSession(cwd, prompt);
+  const result = startNewSession(cwd, prompt, config?.skipPermissions);
   if (result.success) {
     const label = basename(cwd) || cwd;
     const desc = prompt ? `\nPrompt: <i>${esc(prompt)}</i>` : '';
@@ -267,31 +287,32 @@ function handleNew(args: string): void {
 }
 
 function handleKill(args: string): void {
-  const idx = parseInt(args.trim(), 10) - 1;
-  const sessions = getSnapshot();
-
-  if (isNaN(idx) || idx < 0 || idx >= sessions.length) {
-    sendReply(`Usage: <code>/kill 2</code>\nRun /sessions to see available sessions.`);
+  const query = args.trim();
+  if (!query) {
+    sendReply('Usage: <code>/kill orchestra</code> or <code>/kill 2</code>\nRun /sessions to see available sessions.');
     return;
   }
 
-  const session = sessions[idx]!;
+  const result = findSession(query);
+  if ('error' in result) {
+    sendReply(result.error);
+    return;
+  }
+
+  const { session, index } = result;
   const label = sessionLabel(session);
 
   if (!session.cwd) {
-    sendReply(`Session ${idx + 1} (${esc(label)}) has no CWD — cannot kill.`);
+    sendReply(`Session ${index + 1} (${esc(label)}) has no CWD — cannot kill.`);
     return;
   }
 
-  const result = killSession(session.cwd);
-  if (result.success) {
-    // Invalidate caches so subsequent commands see fresh state
+  const killResult = killSession(session.cwd);
+  if (killResult.success) {
     platform.invalidateLivenessCache();
-    sessionSnapshot = [];
-    snapshotAge = 0;
-    sendReply(`🔴 Killed <b>${idx + 1}. ${esc(label)}</b>`);
+    sendReply(`🔴 Killed <b>${index + 1}. ${esc(label)}</b>`);
   } else {
-    sendReply(`❌ Failed to kill ${esc(label)}: ${esc(result.error ?? 'unknown error')}`);
+    sendReply(`❌ Failed to kill ${esc(label)}: ${esc(killResult.error ?? 'unknown error')}`);
   }
 }
 
@@ -299,11 +320,14 @@ function handleHelp(): void {
   sendReply(
     '<b>Claude Orchestra</b>\n\n' +
     '<code>/sessions</code> — List sessions with status and activity\n' +
-    '<code>/send N msg</code> — Send message to session N\n' +
-    '<code>/kill N</code> — Kill session N\n' +
+    '<code>/send name msg</code> — Send message to session by name or number\n' +
+    '<code>/kill name</code> — Kill session by name or number\n' +
     '<code>/new path [prompt]</code> — Start new Claude session\n' +
     '<code>/help</code> — Show this help\n\n' +
-    'Shorthand: <code>1 fix the bug</code> = <code>/send 1 fix the bug</code>'
+    'Sessions can be targeted by project name or index:\n' +
+    '<code>/send orchestra fix the bug</code>\n' +
+    '<code>/send 1 fix the bug</code>\n' +
+    '<code>orchestra fix the bug</code> (shorthand)'
   );
 }
 
@@ -321,9 +345,19 @@ function handleMessage(text: string): void {
   } else if (trimmed.startsWith('/send ') || trimmed.startsWith('/s ')) {
     const args = trimmed.startsWith('/send ') ? trimmed.slice(6) : trimmed.slice(3);
     handleSend(args);
-  } else if (/^\/?\d+\s+/.test(trimmed)) {
-    const cleaned = trimmed.replace(/^\//, '');
-    handleSend(cleaned);
+  } else if (/^\d+\s+/.test(trimmed)) {
+    // Numeric shorthand: "1 fix the bug" → /send 1 fix the bug
+    handleSend(trimmed);
+  } else if (/^\S+\s+\S/.test(trimmed) && !trimmed.startsWith('/')) {
+    // Name shorthand: "orchestra fix the bug" → /send orchestra fix the bug
+    // Only if it matches a known session name (to avoid false positives)
+    const firstWord = trimmed.split(/\s+/)[0]!;
+    const result = findSession(firstWord);
+    if (!('error' in result)) {
+      handleSend(trimmed);
+      return;
+    }
+    sendReply('Unknown command. Send /help for available commands.');
   } else {
     sendReply('Unknown command. Send /help for available commands.');
   }
@@ -382,6 +416,7 @@ export function startTelegramBot(configDir: string, claudeDirPath: string): void
       config = {
         botToken: String(raw.telegram.botToken),
         chatId: Number(raw.telegram.chatId),
+        skipPermissions: raw.skipPermissions === true,
       };
     }
   } catch {

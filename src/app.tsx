@@ -3,7 +3,7 @@ import { Box, Text, useInput, useApp } from 'ink';
 import { Spinner } from '@inkjs/ui';
 import { FullScreenBox, useScreenSize } from 'fullscreen-ink';
 import { useClaudeData } from './hooks.js';
-import { setNotificationsEnabled } from './notify.js';
+import { setNotificationsEnabled, getSkipPermissions } from './notify.js';
 import { sendToSession, focusSession, startNewSession, killSession } from './chat.js';
 import { isSessionProcessBusy } from './sessions.js';
 import { platform } from './platform.js';
@@ -315,7 +315,7 @@ export default function App({ claudeDir }: { claudeDir: string }): ReactNode {
           }
         } else if (inputMode === 'new' && text) {
           const { cwd, prompt } = parseCwdAndPrompt(text);
-          const result = startNewSession(cwd, prompt);
+          const result = startNewSession(cwd, prompt, getSkipPermissions());
           if (result.success) {
             setStatusMsg(`Started session in ${basename(cwd)}`);
           } else {
