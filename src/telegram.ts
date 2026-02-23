@@ -18,6 +18,8 @@ interface TelegramConfig {
 let config: TelegramConfig | null = null;
 let claudeDir = '';
 let sessionCache: SessionCache = new Map();
+let sharedSessions: ActiveSession[] | null = null;
+let onKillCallback: ((cwd: string) => void) | null = null;
 let lastUpdateId = 0;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -88,6 +90,8 @@ function sendReply(html: string): void {
 // ---- Session helpers ----
 
 function getSessions(): ActiveSession[] {
+  // Use the TUI's session list when available — ensures index consistency
+  if (sharedSessions) return sharedSessions;
   return findActiveSessions(claudeDir, sessionCache);
 }
 
@@ -310,6 +314,7 @@ function handleKill(args: string): void {
   const killResult = killSession(session.cwd);
   if (killResult.success) {
     platform.invalidateLivenessCache();
+    if (onKillCallback) onKillCallback(session.cwd);
     sendReply(`🔴 Killed <b>${index + 1}. ${esc(label)}</b>`);
   } else {
     sendReply(`❌ Failed to kill ${esc(label)}: ${esc(killResult.error ?? 'unknown error')}`);
@@ -334,7 +339,7 @@ function handleHelp(): void {
 function handleMessage(text: string): void {
   const trimmed = text.trim();
 
-  if (trimmed === '/sessions' || trimmed === '/s' || trimmed === '/status') {
+  if (trimmed === '/sessions' || trimmed === '/s') {
     handleSessions();
   } else if (trimmed === '/help' || trimmed === '/start') {
     handleHelp();
@@ -425,6 +430,14 @@ export function startTelegramBot(configDir: string, claudeDirPath: string): void
 
   if (!config) return;
   poll();
+}
+
+export function updateTelegramSessions(sessions: ActiveSession[]): void {
+  sharedSessions = sessions;
+}
+
+export function setTelegramKillCallback(cb: (cwd: string) => void): void {
+  onKillCallback = cb;
 }
 
 export function stopTelegramBot(): void {

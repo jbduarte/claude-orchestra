@@ -21,6 +21,7 @@ export interface PlatformAdapter {
   startNewSession(cwd: string, prompt?: string, skipPermissions?: boolean): Result;
   killSession(sessionCwd: string): Result;
   getRunningClaudeCwds(): Set<string>;
+  getRunningCwdCounts(): Map<string, number>;
   isSessionProcessBusy(cwd: string): boolean;
   invalidateLivenessCache(): void;
   sendNotification(title: string, body: string, sound: boolean, done: () => void): void;
@@ -38,22 +39,7 @@ const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
 // ---- CWD matching (shared by Darwin + Linux) ----
 
 export function matchProcessByCwd(processes: ClaudeProcess[], sessionCwd: string): ClaudeProcess | null {
-  let best: ClaudeProcess | null = null;
-  let bestLen = -1;
-
-  for (const p of processes) {
-    if (p.cwd === sessionCwd) return p;
-    if (p.cwd && (sessionCwd.startsWith(p.cwd + '/') || sessionCwd.startsWith(p.cwd + '\\')) && p.cwd.length > bestLen) {
-      best = p;
-      bestLen = p.cwd.length;
-    }
-    if (p.cwd && (p.cwd.startsWith(sessionCwd + '/') || p.cwd.startsWith(sessionCwd + '\\')) && sessionCwd.length > bestLen) {
-      best = p;
-      bestLen = sessionCwd.length;
-    }
-  }
-
-  return best;
+  return processes.find(p => p.cwd === sessionCwd) ?? null;
 }
 
 // ============================================================================
@@ -181,6 +167,14 @@ class DarwinAdapter implements PlatformAdapter {
 
   getRunningClaudeCwds(): Set<string> {
     return new Set(this.getLivenessProcesses().map(p => p.cwd));
+  }
+
+  getRunningCwdCounts(): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const p of this.getLivenessProcesses()) {
+      counts.set(p.cwd, (counts.get(p.cwd) ?? 0) + 1);
+    }
+    return counts;
   }
 
   isSessionProcessBusy(cwd: string): boolean {
@@ -487,9 +481,15 @@ class DarwinAdapter implements PlatformAdapter {
   }
 
   sendToSession(sessionCwd: string, message: string): Result {
+    // Verify the claude process is alive right now — stale data could inject into a bare shell
+    this.invalidateLivenessCache();
     const proc = this.findProcessForSession(sessionCwd);
     if (!proc) {
       return { success: false, error: 'No running process found' };
+    }
+    // Double-check the PID is still alive before pasting
+    try { process.kill(proc.pid, 0); } catch {
+      return { success: false, error: 'Process died before send' };
     }
 
     const app = this.findParentApp(proc.pid);
@@ -782,6 +782,14 @@ class LinuxAdapter implements PlatformAdapter {
     return new Set(this.getLivenessProcesses().map(p => p.cwd));
   }
 
+  getRunningCwdCounts(): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const p of this.getLivenessProcesses()) {
+      counts.set(p.cwd, (counts.get(p.cwd) ?? 0) + 1);
+    }
+    return counts;
+  }
+
   isSessionProcessBusy(cwd: string): boolean {
     const proc = this.getLivenessProcesses().find(p => p.cwd === cwd);
     return proc ? proc.cpu > 1.0 : false;
@@ -1013,6 +1021,11 @@ class WindowsAdapter implements PlatformAdapter {
       return new Set(['__windows_has_claude_process__']);
     }
     return new Set();
+  }
+
+  getRunningCwdCounts(): Map<string, number> {
+    // Windows: no CWD data, return empty
+    return new Map();
   }
 
   isSessionProcessBusy(_cwd: string): boolean {

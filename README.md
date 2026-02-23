@@ -8,14 +8,15 @@ Watches `~/.claude/` for active sessions, teams, tasks, and agent messages — r
 
 ## Features
 
-- **Live session monitoring** — Detects all running Claude Code sessions across Terminal.app, iTerm2, PyCharm, VS Code, and other terminals/IDEs
+- **Live session monitoring** — Detects all running Claude Code sessions across Terminal.app, iTerm2, PyCharm, VS Code, and other terminals/IDEs — including TTY-less IDE sessions
 - **Working/idle status** — Shows whether each session is actively running tools or waiting for input
 - **Teams and tasks** — Tracks Claude Code teams, task progress, and agent statuses
 - **Messages** — Displays agent messages with highlighted action items (plan approvals, shutdown requests)
-- **Desktop notifications** — macOS/Linux alerts when sessions finish, need input, or require approval
-- **Full remote control via Telegram** — Monitor, message, start, and kill sessions from your phone — everything the terminal can do, your phone can too
+- **Desktop notifications** — macOS/Linux alerts when sessions go idle or need input (task completions and messages go to Telegram only to reduce noise)
+- **Full remote control via Telegram** — Monitor, message, start, and kill sessions from your phone — target sessions by project name or index number
 - **Send to session** — Type messages directly into running sessions via keystroke injection (Terminal.app, iTerm2, PyCharm, JetBrains IDEs)
 - **Smart liveness detection** — Filters out closed sessions using process detection, with grace periods to avoid flickering
+- **Cross-platform** — macOS (full support), Linux (dashboard + notifications via notify-send), Windows (dashboard only)
 
 ## Quick Start
 
@@ -109,27 +110,33 @@ Edit `config.json` with your bot token and chat ID:
 
 | Command | Description |
 |---------|-------------|
-| `/sessions` | List all active sessions with status |
+| `/sessions` | List all active sessions with status and last activity |
 | `/send name message` | Send a message to a session by project name or number |
-| `/kill name` | Kill a session by project name or number |
+| `/kill name` | Kill a session by project name or number (SIGTERM → SIGKILL) |
 | `/new /path/to/project [prompt]` | Start a new Claude session in Terminal.app |
 | `/help` | Show available commands |
 
-Sessions can be targeted by **project name** (stable) or by index number:
+Sessions can be targeted by **project name** (case-insensitive substring match, stable across refreshes) or by index number:
 
 ```
-/send orchestra fix the bug    ← by name
+/send orchestra fix the bug    ← by name (substring match)
 /send 1 fix the bug            ← by index
 orchestra fix the bug          ← shorthand
 ```
 
 Shortcuts: `/s` for `/sessions`.
 
+Every command gets a **fresh session list** — no stale snapshots.
+
 The bot also forwards notifications: session completions, idle alerts, and action items.
 
 ## Configuration
 
-Create a `config.json` in the claude-orchestra directory (see `config.example.json`):
+Copy the example config and fill in your credentials:
+
+```sh
+cp config.example.json config.json
+```
 
 ```json
 {
@@ -145,7 +152,7 @@ Create a `config.json` in the claude-orchestra directory (see `config.example.js
 |--------|---------|-------------|
 | `telegram.botToken` | — | Telegram bot token from [@BotFather](https://t.me/BotFather) |
 | `telegram.chatId` | — | Your Telegram chat ID from [@userinfobot](https://t.me/userinfobot) |
-| `skipPermissions` | `false` | Start new sessions with `--dangerously-skip-permissions`. Only enable this if you understand the implications — it allows Claude to run commands without confirmation. |
+| `skipPermissions` | `false` | Start new sessions with `--dangerously-skip-permissions` (from TUI and Telegram `/new`). Only enable if you understand the implications — it allows Claude to run commands without confirmation. |
 
 > `config.json` is gitignored — your credentials and settings stay local.
 
@@ -169,13 +176,16 @@ Session **send** (keystroke injection) supports:
 ## How It Works
 
 - Scans `~/.claude/projects/` for JSONL session files modified in the last 4 hours
-- Uses `ps` + `lsof` to detect running Claude processes and their working directories
+- Uses `ps` + `lsof` to detect running Claude processes and their working directories (including TTY-less IDE processes)
 - Filters closed sessions: 5-minute idle threshold before process check, 5-minute grace period after close
 - Auto-kills orphaned child processes from closed sessions
+- Kill uses SIGTERM with 3-second timeout, escalating to SIGKILL if needed
 - Uses CPU usage detection to avoid false idle notifications during context compaction
+- One idle notification per session per idle period — clears when session goes back to working
 - Watches filesystem with chokidar (200ms debounce) + 5s periodic refresh as safety net
 - Per-file mtime caching — only re-parses files that changed
 - Resolves System Events process names at runtime for correct IDE window targeting
+- Platform-specific adapters for macOS, Linux, and Windows
 
 ## Development
 
@@ -192,8 +202,9 @@ npm run build    # compile to dist/
 
 - **Node.js >= 20** — Install from [nodejs.org](https://nodejs.org/) or via Homebrew: `brew install node`
 - **npm** — Included with Node.js (no separate install needed)
-- **macOS** — Notifications and keystroke injection use AppleScript/System Events
-- **Linux** — Session detection and dashboard work; notifications use notify-send; keystroke injection not available
+- **macOS** — Full support: dashboard, notifications (AppleScript), keystroke injection (System Events), window focus
+- **Linux** — Dashboard, notifications via `notify-send`, session detection; keystroke injection not available
+- **Windows** — Dashboard and session detection; notifications and keystroke injection not available
 
 ## License
 

@@ -8,6 +8,7 @@ import { findActiveSessions, readLastAssistantText, isSessionProcessBusy } from 
 import type { SessionCache } from './sessions.js';
 import { DEBOUNCE_MS, AWAIT_WRITE_STABILITY_MS, AWAIT_WRITE_POLL_MS, AUTO_REFRESH_MS } from './constants.js';
 import { sendNotification } from './notify.js';
+import { updateTelegramSessions, setTelegramKillCallback } from './telegram.js';
 
 // ---- Data reducer ----
 
@@ -208,6 +209,7 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
     }
 
     dataRef.current = newData;
+    updateTelegramSessions(sessions);
     dispatch({ type: 'FULL_REFRESH', payload: newData });
   }, [claudeDir]);
 
@@ -275,6 +277,12 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
     debouncedRef.current?.cancel();
     doRefresh();
   }, [doRefresh]);
+
+  // Let Telegram kills also update the TUI's killed-session filter
+  useEffect(() => {
+    setTelegramKillCallback(markKilled);
+    return () => setTelegramKillCallback(() => {});
+  }, [markKilled]);
 
   return { ...data, forceRefresh, markKilled };
 }

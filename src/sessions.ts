@@ -139,8 +139,8 @@ function decodeProjectName(encoded: string): string {
 // ---- Session liveness detection ----
 // Process detection is delegated to platform adapters (see platform.ts).
 
-const IDLE_CHECK_MS = 5 * 60 * 1000;   // Start checking after 5min idle
-const CLOSED_GRACE_MS = 5 * 60 * 1000; // Keep closed sessions visible for 5min
+const IDLE_CHECK_MS = 5 * 60 * 1000;   // Consider idle after 5min without JSONL writes
+const CLOSED_GRACE_MS = 60 * 1000;     // Keep process-less sessions for 1min after last activity
 
 /** Check if a session's claude process is actively using CPU (compaction, API call, etc.) */
 export function isSessionProcessBusy(cwd: string): boolean {
@@ -259,22 +259,32 @@ export function findActiveSessions(claudeDir: string, cache: SessionCache): Acti
   const alive = sessions.filter(s => {
     const idleMs = now2 - s.lastActivityMs;
 
-    // Recently active — always show (no process check needed)
-    if (idleMs < IDLE_CHECK_MS) return true;
-
     if (isWindows) {
       // Windows: can't match CWD. If any claude process exists AND session was
       // active in the last hour, consider alive. Otherwise use grace period.
       if (runningCwds.size > 0 && idleMs < 60 * 60 * 1000) return true;
     } else {
-      // Unix: precise CWD matching
+      // Unix: precise CWD matching — running process means alive
       if (s.cwd && runningCwds.has(s.cwd)) return true;
     }
 
-    // No matching process — session is closed. Keep for grace period, then remove.
-    return idleMs < IDLE_CHECK_MS + CLOSED_GRACE_MS;
+    // No matching process — keep briefly for grace period, then remove.
+    return idleMs < CLOSED_GRACE_MS;
+  });
+
+  // Deduplicate: if N sessions share a CWD but only M processes exist for it,
+  // keep only the M most recently active sessions (others are stale JSONL files).
+  // Sort most-recent-first so we keep the freshest ones.
+  alive.sort((a, b) => b.lastActivityMs - a.lastActivityMs);
+  const cwdCounts = platform.getRunningCwdCounts();
+  const cwdSeen = new Map<string, number>();
+  const deduped = alive.filter(s => {
+    if (!s.cwd || !runningCwds.has(s.cwd)) return true; // grace-period sessions pass through
+    const seen = (cwdSeen.get(s.cwd) ?? 0) + 1;
+    cwdSeen.set(s.cwd, seen);
+    return seen <= (cwdCounts.get(s.cwd) ?? 1);
   });
 
   // Sort by start time (stable). Tiebreaker: sessionId for deterministic order.
-  return alive.sort((a, b) => a.startedMs - b.startedMs || a.sessionId.localeCompare(b.sessionId));
+  return deduped.sort((a, b) => a.startedMs - b.startedMs || a.sessionId.localeCompare(b.sessionId));
 }
