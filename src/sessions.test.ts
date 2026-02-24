@@ -11,6 +11,7 @@ const {
   mockFstatSync,
   mockExistsSync,
   mockGetRunningClaudeCwds,
+  mockGetRunningCwdCounts,
   mockCleanupOrphanedProcesses,
   mockIsSessionProcessBusy,
   mockEncodeHomePath,
@@ -23,6 +24,7 @@ const {
   mockFstatSync: vi.fn(),
   mockExistsSync: vi.fn(),
   mockGetRunningClaudeCwds: vi.fn<() => Set<string>>(),
+  mockGetRunningCwdCounts: vi.fn<() => Map<string, number>>(),
   mockCleanupOrphanedProcesses: vi.fn(),
   mockIsSessionProcessBusy: vi.fn<(_cwd: string) => boolean>(),
   mockEncodeHomePath: vi.fn((home: string) =>
@@ -47,6 +49,7 @@ vi.mock('node:fs', () => ({
 vi.mock('./platform.js', () => ({
   platform: {
     getRunningClaudeCwds: (...args: unknown[]) => mockGetRunningClaudeCwds(...(args as [])),
+    getRunningCwdCounts: (...args: unknown[]) => mockGetRunningCwdCounts(...(args as [])),
     cleanupOrphanedProcesses: (...args: unknown[]) => mockCleanupOrphanedProcesses(...args),
     isSessionProcessBusy: (...args: unknown[]) => mockIsSessionProcessBusy(...(args as [string])),
     encodeHomePath: (...args: unknown[]) => mockEncodeHomePath(...(args as [string])),
@@ -122,6 +125,7 @@ describe('findActiveSessions', () => {
     cache.clear();
     // Default: mock as Unix platform with no running processes
     mockGetRunningClaudeCwds.mockReturnValue(new Set());
+    mockGetRunningCwdCounts.mockReturnValue(new Map());
     // Restore default Unix encodeHomePath
     mockEncodeHomePath.mockImplementation((home: string) =>
       '-' + home.split('/').filter(Boolean).join('-').replace(/\./g, '-'),
@@ -129,10 +133,11 @@ describe('findActiveSessions', () => {
     vi.useFakeTimers({ now: NOW });
   });
 
-  it('shows recently active session (< 5min idle) regardless of running processes', () => {
+  it('shows recently active session within grace period (< 1min idle)', () => {
     const cwd = '/home/user/project';
-    const content = userLine('hello', cwd, 2); // 2min ago
-    setupSingleSession(2, content, cwd);
+    // 30 seconds ago — within 60s grace period
+    const content = userLine('hello', cwd, 0.5);
+    setupSingleSession(0.5, content, cwd);
 
     const sessions = findActiveSessions(claudeDir, cache);
     expect(sessions).toHaveLength(1);
@@ -144,6 +149,7 @@ describe('findActiveSessions', () => {
     const content = userLine('working', cwd, 8); // 8min idle
     setupSingleSession(8, content, cwd);
     mockGetRunningClaudeCwds.mockReturnValue(new Set([cwd]));
+    mockGetRunningCwdCounts.mockReturnValue(new Map([[cwd, 1]]));
 
     const sessions = findActiveSessions(claudeDir, cache);
     expect(sessions).toHaveLength(1);
@@ -151,8 +157,8 @@ describe('findActiveSessions', () => {
 
   it('filters idle Unix session when CWD is NOT in runningCwds (past grace)', () => {
     const cwd = '/home/user/project';
-    const content = userLine('old work', cwd, 15); // 15min idle — past 5min idle + 5min grace
-    setupSingleSession(15, content, cwd);
+    const content = userLine('old work', cwd, 2); // 2min idle — past 60s grace period
+    setupSingleSession(2, content, cwd);
     mockGetRunningClaudeCwds.mockReturnValue(new Set());
 
     const sessions = findActiveSessions(claudeDir, cache);
@@ -161,8 +167,9 @@ describe('findActiveSessions', () => {
 
   it('shows closed session during grace period', () => {
     const cwd = '/home/user/project';
-    const content = userLine('just closed', cwd, 7); // 7min idle — within 5+5=10min window
-    setupSingleSession(7, content, cwd);
+    // 45 seconds idle — within 60s grace period
+    const content = userLine('just closed', cwd, 0.75);
+    setupSingleSession(0.75, content, cwd);
     mockGetRunningClaudeCwds.mockReturnValue(new Set());
 
     const sessions = findActiveSessions(claudeDir, cache);
@@ -199,6 +206,7 @@ describe('findActiveSessions (Windows)', () => {
     setupSingleSession(8, content, cwd);
     // Windows sentinel: any claude process running
     mockGetRunningClaudeCwds.mockReturnValue(new Set(['__windows_has_claude_process__']));
+    mockGetRunningCwdCounts.mockReturnValue(new Map());
 
     const sessions = findActiveSessions(claudeDir, cache);
     expect(sessions).toHaveLength(1);
@@ -209,6 +217,7 @@ describe('findActiveSessions (Windows)', () => {
     const content = userLine('old work', cwd, 90); // 90min idle — past 1hr cutoff
     setupSingleSession(90, content, cwd);
     mockGetRunningClaudeCwds.mockReturnValue(new Set(['__windows_has_claude_process__']));
+    mockGetRunningCwdCounts.mockReturnValue(new Map());
 
     const sessions = findActiveSessions(claudeDir, cache);
     expect(sessions).toHaveLength(0);

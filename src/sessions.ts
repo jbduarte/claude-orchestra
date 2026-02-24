@@ -147,6 +147,17 @@ export function isSessionProcessBusy(cwd: string): boolean {
   return platform.isSessionProcessBusy(cwd);
 }
 
+/** Match a session CWD against running process CWDs.
+ * Handles CWD drift when Claude tools change the working directory —
+ * the JSONL may record a subdirectory while lsof still shows the launch directory. */
+function findMatchingRunningCwd(sessionCwd: string, runningCwds: Set<string>): string | null {
+  if (runningCwds.has(sessionCwd)) return sessionCwd;
+  for (const cwd of runningCwds) {
+    if (sessionCwd.startsWith(cwd + '/') || cwd.startsWith(sessionCwd + '/')) return cwd;
+  }
+  return null;
+}
+
 // ---- Main: find active sessions ----
 
 export function findActiveSessions(claudeDir: string, cache: SessionCache): ActiveSession[] {
@@ -264,8 +275,10 @@ export function findActiveSessions(claudeDir: string, cache: SessionCache): Acti
       // active in the last hour, consider alive. Otherwise use grace period.
       if (runningCwds.size > 0 && idleMs < 60 * 60 * 1000) return true;
     } else {
-      // Unix: precise CWD matching — running process means alive
-      if (s.cwd && runningCwds.has(s.cwd)) return true;
+      // Unix: CWD matching — running process means alive.
+      // Uses sub-path matching to handle CWD drift (when Claude tools cd into subdirectories,
+      // the JSONL records the new CWD but lsof still shows the original launch directory).
+      if (s.cwd && findMatchingRunningCwd(s.cwd, runningCwds) !== null) return true;
     }
 
     // No matching process — keep briefly for grace period, then remove.
@@ -279,10 +292,12 @@ export function findActiveSessions(claudeDir: string, cache: SessionCache): Acti
   const cwdCounts = platform.getRunningCwdCounts();
   const cwdSeen = new Map<string, number>();
   const deduped = alive.filter(s => {
-    if (!s.cwd || !runningCwds.has(s.cwd)) return true; // grace-period sessions pass through
-    const seen = (cwdSeen.get(s.cwd) ?? 0) + 1;
-    cwdSeen.set(s.cwd, seen);
-    return seen <= (cwdCounts.get(s.cwd) ?? 1);
+    // Match against running CWDs (with sub-path support for drifted CWDs)
+    const matchedCwd = s.cwd ? findMatchingRunningCwd(s.cwd, runningCwds) : null;
+    if (!s.cwd || !matchedCwd) return true; // grace-period sessions pass through
+    const seen = (cwdSeen.get(matchedCwd) ?? 0) + 1;
+    cwdSeen.set(matchedCwd, seen);
+    return seen <= (cwdCounts.get(matchedCwd) ?? 1);
   });
 
   // Sort by start time (stable). Tiebreaker: sessionId for deterministic order.

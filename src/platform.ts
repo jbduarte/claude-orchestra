@@ -39,7 +39,29 @@ const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
 // ---- CWD matching (shared by Darwin + Linux) ----
 
 export function matchProcessByCwd(processes: ClaudeProcess[], sessionCwd: string): ClaudeProcess | null {
-  return processes.find(p => p.cwd === sessionCwd) ?? null;
+  // Exact match first
+  const exact = processes.find(p => p.cwd === sessionCwd);
+  if (exact) return exact;
+
+  // Sub-path match: handle CWD drift when Claude tools cd into subdirectories.
+  // The JSONL may record a different CWD than the process's actual CWD (from lsof).
+  let best: ClaudeProcess | null = null;
+  let bestLen = 0;
+  const sep = sessionCwd.includes('\\') ? '\\' : '/';
+  for (const p of processes) {
+    if (!p.cwd) continue;
+    // Session CWD is a subdirectory of process CWD
+    if (sessionCwd.startsWith(p.cwd + sep) && p.cwd.length > bestLen) {
+      best = p;
+      bestLen = p.cwd.length;
+    }
+    // Process CWD is a subdirectory of session CWD
+    if (p.cwd.startsWith(sessionCwd + sep) && sessionCwd.length > bestLen) {
+      best = p;
+      bestLen = sessionCwd.length;
+    }
+  }
+  return best;
 }
 
 // ============================================================================
