@@ -134,7 +134,7 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
   const debouncedRef = useRef<ReturnType<typeof debounce> | null>(null);
   const workingSessionsRef = useRef(new Set<string>());
   const knownSessionsRef = useRef(new Set<string>());
-  const notifiedIdleRef = useRef(new Set<string>());
+  const idleNotifCountRef = useRef(new Map<string, number>());
   const killedCwdsRef = useRef(new Set<string>());
   const isFirstRefresh = useRef(true);
 
@@ -177,30 +177,35 @@ export function useClaudeData(claudeDir: string): DataState & { forceRefresh: ()
           if (s.cwd && isSessionProcessBusy(s.cwd)) nowWorking.add(s.sessionId);
         }
       }
-      // Clear idle-notified flag for sessions that are working again
-      for (const id of nowWorking) {
-        notifiedIdleRef.current.delete(id);
-      }
       // Sessions that WERE working but are NOW idle (working→idle transition)
-      // Only notify ONCE per idle period — cleared when session goes back to working
+      // Cap idle notifications at 2 per session to avoid spam
+      const MAX_IDLE_NOTIFS = 2;
       for (const id of workingSessionsRef.current) {
-        if (!nowWorking.has(id) && !notifiedIdleRef.current.has(id)) {
-          const s = newData.sessions.find(sess => sess.sessionId === id);
-          if (s) {
-            const label = (s.cwd ? basename(s.cwd) : undefined) ?? s.project;
-            notifiedIdleRef.current.add(id);
-            events.push({
-              type: 'agent_idle',
-              title: 'Awaiting the Maestro',
-              body: `${label} awaits your direction, Maestro`,
-              dedupeKey: `idle:${s.sessionId}`,
-            });
+        if (!nowWorking.has(id)) {
+          const count = idleNotifCountRef.current.get(id) ?? 0;
+          if (count < MAX_IDLE_NOTIFS) {
+            const s = newData.sessions.find(sess => sess.sessionId === id);
+            if (s) {
+              const label = (s.cwd ? basename(s.cwd) : undefined) ?? s.project;
+              idleNotifCountRef.current.set(id, count + 1);
+              events.push({
+                type: 'agent_idle',
+                title: 'Awaiting the Maestro',
+                body: `${label} awaits your direction, Maestro`,
+                dedupeKey: `idle:${s.sessionId}:${count}`,
+              });
+            }
           }
         }
       }
       // Track all known sessions (working + idle we've already seen)
       workingSessionsRef.current = nowWorking;
-      knownSessionsRef.current = new Set(newData.sessions.map(s => s.sessionId));
+      const currentSessionIds = new Set(newData.sessions.map(s => s.sessionId));
+      // Clean up idle counts for sessions that no longer exist
+      for (const id of idleNotifCountRef.current.keys()) {
+        if (!currentSessionIds.has(id)) idleNotifCountRef.current.delete(id);
+      }
+      knownSessionsRef.current = currentSessionIds;
       isFirstRefresh.current = false;
 
       for (const evt of events) {
